@@ -6,6 +6,10 @@
 > **⚠️ Status: 2 of 9 worlds are in this repository** (`world_01_crt`, `world_02_pixel`).
 > The other seven are listed in the roadmap below but their code is **not yet published**.
 
+<p align="center">
+  <img src="docs/preview/hero.jpg" alt="World 01 CRT terminal / World 02 16-bit pixel platformer" width="100%">
+</p>
+
 ---
 
 ## 1. 项目简介 (Overview)
@@ -15,6 +19,14 @@
 故事讲述一颗沉睡在老式 CRT 终端里的灰白线框小球，被一颗从天而降的四角凹弧星芒 `✦` 唤醒，化作 Q 弹的**星芒史莱姆（Star-Spark Slime）**，开启了一场横跨 **9 种截然不同视觉媒介与画风** 的奇幻解谜与追逐之旅。
 
 本项目将每个世界拆解为独立的**代码实现 (`worlds/world_XX_*`)** 与标准化的**技能卡 (`skills/world-XX-*/SKILL.md`)**，方便开发者直接复用任意画风管线、物理弹簧角色绑定或音画同步方案。
+
+### 视觉预览 (Gallery)
+
+| World 01 · 矩阵终端序章 | World 02 · 16-Bit 像素大闯关 |
+| :---: | :---: |
+| [![World 01 CRT](docs/preview/world_01_sheet.jpg)](worlds/world_01_crt/contact_sheet_01.png) | [![World 02 Pixel](docs/preview/world_02_sheet.jpg)](worlds/world_02_pixel/contact_sheet_02.png) |
+
+*点击缩略图查看 20 帧全尺寸 contact sheet。其余七界迁入后按同一格式补齐。*
 
 ---
 
