@@ -33,6 +33,11 @@
 ## 2. 九大世界与技能路线图 (9 Worlds & Skills Roadmap)
 
 > 当前进度：**项目基础框架 + World 01 (CRT) & World 02 (Pixel) 已完成去品牌化整理与 Skill 提取**（其余世界陆续合入中）。
+>
+> **为什么目前只有 2 界？** 其余七界的原始代码在旧 showcase 中，尚不能直接复制：
+> - **04 / 06 / 07（PyCairo）**：结构与 01/02 相同，但仍依赖 `gemini_slime_engine`、`styles_v5`、`基层.pipeline`，需要包名迁移 + API 回归；风格模块编号也与世界号不一致（04→`style_07_inkwash`、06→`style_08_stainedglass`、07→`style_09_rubberhose`）。
+> - **03 / 05 / 08 / 09（Three.js）**：没有 `sim_/level_`，是 HTML + Playwright 截图管线；HTML 通过 CDN 加载 Three.js / Tailwind，迁入前需要 vendoring 与浏览器依赖。
+> - 原始媒体共约 800MB（mp4 / wav / split / spike / backup），只能挑源码 + contact sheet 入库。
 
 | 序号 | 世界目录 (`worlds/`) | 名称 | 视觉媒介与渲染管线 | 时长 | 本关实物信物 (Token) | 提取技能 (`skills/`) | 状态 |
 | :--: | :-- | :-- | :-- | :--: | :-- | :-- | :--: |
