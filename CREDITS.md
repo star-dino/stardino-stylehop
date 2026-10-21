@@ -16,7 +16,7 @@ This project builds upon the architecture, procedural audio synthesis, and sound
 - **Repository**: [https://github.com/lemomo-ai/lemo-opuscar](https://github.com/lemomo-ai/lemo-opuscar)
 - **Copyright**: `Copyright (c) 2026 LemoLab`
 - **License**: MIT License
-- **License text**: full MIT notice reproduced in [LICENSE](LICENSE) because this repository contains **adapted** code, not just imports:
+- **License text**: full MIT notice reproduced in [LICENSE-THIRD-PARTY](LICENSE-THIRD-PARTY) because this repository contains **adapted** code, not just imports:
   - `corelib/audio_dsp.py` — `quick_click` / `quick_thump` / `quick_whoosh` are ports of upstream `core/audio/sfx.py` (`click` / `thump` / `whoosh`), refactored onto local helper functions but sharing the same durations, partials and envelopes.
   - `worlds/*/audio_*.py` — synthesis recipes (instrument layering, filter settings, mastering targets) derived from upstream style demos.
 - **Distribution**: the library itself is a **runtime dependency only**, cloned separately via `LEMO_OPUSCAR_ROOT`; no upstream source tree is vendored here.
@@ -25,7 +25,7 @@ This project builds upon the architecture, procedural audio synthesis, and sound
 ### B. `earshot`
 - **Repository**: [https://github.com/Leonxlnx/earshot](https://github.com/Leonxlnx/earshot)
 - **Copyright**: `Copyright (c) 2026 Leon Lin`
-- **License**: MIT License (full text reproduced in [LICENSE](LICENSE))
+- **License**: MIT License (full text reproduced in [LICENSE-THIRD-PARTY](LICENSE-THIRD-PARTY))
 - **Usage in `stardino-stylehop`**:
   - Acoustically fitted modal/spectral Foley bank (`earshot.forge.bank`) and EBU R128 loudness mastering & sidechain ducking (`master.py`).
 - **Distribution**: referenced as a **runtime dependency only** — cloned separately via `EARSHOT_ROOT`; no earshot source is vendored in this repository.

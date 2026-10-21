@@ -113,6 +113,7 @@ Image.fromarray(render_frame_from_state(s[630])[:,:,:3]).save('/tmp/f210.png')"
 ## 5. 开源协议与致谢声明 (License & Acknowledgments)
 
 - **许可证 (License)**：本项目采用 **[MIT License](LICENSE)** 开源，`Copyright (c) 2026 Star Dinosaur (星星恐龙)`。
+- **第三方许可证 (Third-Party Notices)**：上游 MIT 全文与 CC BY 采样声明见 [`LICENSE-THIRD-PARTY`](LICENSE-THIRD-PARTY)。
 - **AI 生成声明 (AI Disclosure)**：本项目的动画渲染代码、分镜脚本与视听合成逻辑由 **Gemini 4** 生成与打磨。
 - **上游开源致谢 (Upstream MIT Projects)**：
   - **[`lemo-opuscar`](https://github.com/lemomo-ai/lemo-opuscar)** (`Copyright (c) 2026 LemoLab`, MIT License) — 提供了真实乐器采样器 (`sampler.py`)、物理拨弦建模 (`pluck.py`)、程序化拟音 (`sfx.py`) 及多项画风工程范式启发。
