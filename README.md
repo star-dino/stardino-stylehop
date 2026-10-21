@@ -3,12 +3,8 @@
 > **A 9-World Multi-Style Procedural Animation & Reusable Skill Library** — *work in progress*
 > Created by **Star Dinosaur (星星恐龙)** · Generated with **Gemini 4** · Licensed under **MIT**
 >
-> **⚠️ Status: 2 of 9 worlds are in this repository** (`world_01_crt`, `world_02_pixel`).
-> The other seven are listed in the roadmap below but their code is **not yet published**.
-
-<p align="center">
-  <img src="docs/preview/hero.jpg" alt="World 01 CRT terminal / World 02 16-bit pixel platformer" width="100%">
-</p>
+> **⚠️ Status: 5 of 9 worlds are in this repository** (`world_01_crt`, `world_02_pixel`, `world_04_inkwash`, `world_06_stainedglass`, `world_07_rubberhose`).
+> The full film has 10 segments (9 worlds + a finale); the finale is **withheld due to design copyright** and is not part of this repository.
 
 ---
 
@@ -20,34 +16,27 @@
 
 本项目将每个世界拆解为独立的**代码实现 (`worlds/world_XX_*`)** 与标准化的**技能卡 (`skills/world-XX-*/SKILL.md`)**，方便开发者直接复用任意画风管线、物理弹簧角色绑定或音画同步方案。
 
-### 视觉预览 (Gallery)
-
-| World 01 · 矩阵终端序章 | World 02 · 16-Bit 像素大闯关 |
-| :---: | :---: |
-| [![World 01 CRT](docs/preview/world_01_sheet.jpg)](worlds/world_01_crt/contact_sheet_01.png) | [![World 02 Pixel](docs/preview/world_02_sheet.jpg)](worlds/world_02_pixel/contact_sheet_02.png) |
-
-*点击缩略图查看 20 帧全尺寸 contact sheet。其余七界迁入后按同一格式补齐。*
-
 ---
 
 ## 2. 九大世界与技能路线图 (9 Worlds & Skills Roadmap)
 
-> 当前进度：**项目基础框架 + World 01 (CRT) & World 02 (Pixel) 已完成去品牌化整理与 Skill 提取**（其余世界陆续合入中）。
+> 当前进度：**World 01 / 02 / 04 / 06 / 07 已完成去品牌化、包名迁移与 Skill 提取**（03 / 05 / 08 / 09 暂缓，10 finale 不纳入）。
 >
-> **为什么目前只有 2 界？** 其余七界的原始代码在旧 showcase 中，尚不能直接复制：
-> - **04 / 06 / 07（PyCairo）**：结构与 01/02 相同，但仍依赖 `gemini_slime_engine`、`styles_v5`、`基层.pipeline`，需要包名迁移 + API 回归；风格模块编号也与世界号不一致（04→`style_07_inkwash`、06→`style_08_stainedglass`、07→`style_09_rubberhose`）。
+> **迁移说明**：
+> - **04 / 06 / 07（PyCairo）**：已完成 `gemini_slime_engine` → `slime_engine`、`styles_v5` → `styles`、`基层` → `corelib` 迁移；风格模块按世界号重编号为 `style_04_inkwash` / `style_06_stainedglass` / `style_07_rubberhose`。
 > - **03 / 05 / 08 / 09（Three.js）**：没有 `sim_/level_`，是 HTML + Playwright 截图管线；HTML 通过 CDN 加载 Three.js / Tailwind，迁入前需要 vendoring 与浏览器依赖。
-> - 原始媒体共约 800MB（mp4 / wav / split / spike / backup），只能挑源码 + contact sheet 入库。
+> - **10 finale**：完整片为 10 段（9 界 + finale），finale 因设计版权不纳入本仓库。
+> - 原始媒体共约 800MB（mp4 / wav / split / spike / backup），只挑源码 + contact sheet 入库。
 
 | 序号 | 世界目录 (`worlds/`) | 名称 | 视觉媒介与渲染管线 | 时长 | 本关实物信物 (Token) | 提取技能 (`skills/`) | 状态 |
 | :--: | :-- | :-- | :-- | :--: | :-- | :-- | :--: |
 | **01** | [`world_01_crt`](worlds/world_01_crt/) | 矩阵终端序章 | CRT 曲面磷光字符 + ASCII 球面映射 (PyCairo/NumPy) | 26.0s | 磷光回车键帽 (`[ ↵ ]`) | [`world-01-crt`](skills/world-01-crt/SKILL.md) | ✅ 已就绪 |
 | **02** | [`world_02_pixel`](worlds/world_02_pixel/) | 16-Bit 像素大闯关 | 320×180 原生像素 + Bayer 抖动 + 6× NEAREST (PyCairo) | 28.0s | 16-Bit 像素游戏币 | [`world-02-pixel`](skills/world-02-pixel/SKILL.md) | ✅ 已就绪 |
 | **03** | `world_03_cyber` | 赛博霓虹疾驰列车 | 3D 赛博都市列车 + 2D 纯白刀锋眼漫画破框 (Three.js) | 24.0s | 破框星芒 | `world-03-cyber` | ⏳ 待迁入 |
-| **04** | `world_04_inkwash` | 水墨宣纸千里长卷 | 宋代水墨宣纸 + 悬空巨笔画桥 + 太极化荷 (PyCairo) | 28.0s | 朱砂墨印 / 莲心星 | `world-04-inkwash` | ⏳ 待迁入 |
+| **04** | [`world_04_inkwash`](worlds/world_04_inkwash/) | 水墨宣纸千里长卷 | 宋代水墨宣纸 + 悬空巨笔画桥 + 太极化荷 (PyCairo) | 28.0s | 朱砂墨印 / 莲心星 | [`world-04-inkwash`](skills/world-04-inkwash/SKILL.md) | ✅ 已就绪 |
 | **05** | `world_05_paper` | 纸雕立体书山谷 | 3D 折纸群山 + 乘千纸鹤 + 180° 净空大翻页 (Three.js) | 30.0s | 灯笼星徽 | `world-05-paper` | ⏳ 待迁入 |
-| **06** | `world_06_stainedglass` | 哥特玫瑰彩窗圣殿 | -10° 倾斜彩窗圣殿 + 敲钟声波架彩虹桥 (PyCairo) | 26.0s | 彩绘琉璃小钟铃 | `world-06-stainedglass` | ⏳ 待迁入 |
-| **07** | `world_07_rubberhose` | 1930s 橡皮管爵士舞台 | 3D 波浪琴键 + 赛璐璐胶片噪点 + 留声机 Boss (PyCairo) | 26.0s | 黄金黑胶唱片 | `world-07-rubberhose` | ⏳ 待迁入 |
+| **06** | [`world_06_stainedglass`](worlds/world_06_stainedglass/) | 哥特玫瑰彩窗圣殿 | -10° 倾斜彩窗圣殿 + 敲钟声波架彩虹桥 (PyCairo) | 26.0s | 彩绘琉璃小钟铃 | [`world-06-stainedglass`](skills/world-06-stainedglass/SKILL.md) | ✅ 已就绪 |
+| **07** | [`world_07_rubberhose`](worlds/world_07_rubberhose/) | 1930s 橡皮管爵士舞台 | 3D 波浪琴键 + 赛璐璐胶片噪点 + 留声机 Boss (PyCairo) | 26.0s | 黄金黑胶唱片 | [`world-07-rubberhose`](skills/world-07-rubberhose/SKILL.md) | ✅ 已就绪 |
 | **08** | `world_08_clay` | 移轴微缩粘土书桌 | 粘土指纹肌理 + 多米诺骨牌搭咖啡河桥 (Three.js) | 15.0s | 引路星徽 | `world-08-clay` | ⏳ 待迁入 |
 | **09** | `world_09_blueprint` | 工程蓝图 ↔ 3D 浮岛 | 普鲁士蓝 CAD 线框撕裂升维 3D 马卡龙浮岛 (Three.js) | 34.0s | 蓝图星盘 (Compass-Star) | `world-09-blueprint` | ⏳ 待迁入 |
 
@@ -68,7 +57,7 @@
    - `corelib/pipeline.py`：多进程分片并行 FFmpeg 渲染管线与分镜缩略图生成。
    - `corelib/audio_dsp.py`：48kHz 立体声基础滤波、混响与母带工具。
 3. **画风渲染层 (`styles/`)**：
-   - `styles/style_01_crt.py` / `styles/style_02_pixel.py`：与 sim 解耦的纯绘制入口；`render_keyframe()` / `build_native_world()` 可脱离剧情直接出单帧，`worlds/*/level_*.py` 只做「状态 → 帧」的总装。
+   - `styles/style_01_crt.py` / `style_02_pixel.py` / `style_04_inkwash.py` / `style_06_stainedglass.py` / `style_07_rubberhose.py`：与 sim 解耦的纯绘制入口；`render_keyframe()` / `build_native_world()` 可脱离剧情直接出单帧，`worlds/*/level_*.py` 只做「状态 → 帧」的总装。
 
 ---
 

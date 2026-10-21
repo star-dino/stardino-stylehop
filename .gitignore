@@ -43,10 +43,6 @@ backup_original_audio/
 *.tif
 *.tiff
 !contact_sheet_*.png
-
-# README preview images (generated from deterministic keyframes / contact sheets)
-!docs/preview/*.jpg
-!docs/preview/*.png
 *.log
 
 # Large Rendered Media (Distribute via GitHub Releases or LFS if needed)
