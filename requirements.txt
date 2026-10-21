@@ -1,0 +1,25 @@
+# Runtime Python dependencies for stardino-stylehop.
+#
+#   python3 -m venv .venv && . .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# System packages are also required:
+#   - ffmpeg (with libx264; used by corelib/pipeline.py for every render)
+#   - libcairo2 / cairo-devel (pycairo needs the C headers to build)
+#     Debian/Ubuntu: sudo apt install ffmpeg libcairo2-dev pkg-config python3-dev
+#
+# Two audio toolchains are OPTIONAL and are NOT installed from PyPI.
+# They are MIT-licensed and resolved at runtime via environment variables:
+#   - lemo-opuscar  -> export LEMO_OPUSCAR_ROOT=/path/to/lemo-opuscar
+#                      https://github.com/lemomo-ai/lemo-opuscar
+#   - earshot       -> export EARSHOT_ROOT=/path/to/earshot
+#                      https://github.com/Leonxlnx/earshot
+# Only the audio_*.py scripts and build_world_*.py need them; frame rendering
+# works without both.
+
+numpy>=1.24
+pillow>=10.0
+pycairo>=1.24
+scipy>=1.10
+soundfile>=0.12
+numba>=0.58
