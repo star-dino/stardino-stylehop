@@ -16,7 +16,7 @@ This project builds upon the architecture, procedural audio synthesis, and sound
 - **Repository**: [https://github.com/lemomo-ai/lemo-opuscar](https://github.com/lemomo-ai/lemo-opuscar)
 - **Copyright**: `Copyright (c) 2026 LemoLab`
 - **License**: MIT License
-- **License text**: full MIT notice reproduced in [LICENSE-THIRD-PARTY](LICENSE-THIRD-PARTY) because this repository contains **adapted** code, not just imports:
+- **License text**: full MIT notice reproduced in [LICENSE-THIRD-PARTY](LICENSE-THIRD-PARTY) because this repository contained **adapted** code, not just imports (the files below lived in `showcase/`, removed from the repository on 2026-11-03; they remain in git history):
   - `showcase/corelib/audio_dsp.py` — `quick_click` / `quick_thump` / `quick_whoosh` are ports of upstream `core/audio/sfx.py` (`click` / `thump` / `whoosh`), refactored onto local helper functions but sharing the same durations, partials and envelopes.
   - `showcase/worlds/*/audio_*.py` — synthesis recipes (instrument layering, filter settings, mastering targets) derived from upstream style demos.
 - **Distribution**: the library itself is a **runtime dependency only**, cloned separately via `LEMO_OPUSCAR_ROOT`; no upstream source tree is vendored here.

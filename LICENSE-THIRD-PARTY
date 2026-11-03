@@ -8,7 +8,8 @@ below as required by the MIT License ("The above copyright notice and this
 permission notice shall be included in all copies or substantial portions of
 the Software.").
 
-Adapted code in this repository includes, but is not limited to:
+Adapted code (in `showcase/`, removed from the repository on 2026-11-03 and kept
+in git history) included:
   - `showcase/corelib/audio_dsp.py` — Foley primitives ported from lemo-opuscar/core/audio/sfx.py
     (`quick_click`, `quick_thump`, `quick_whoosh`).
   - `showcase/worlds/*/audio_*.py` — synthesis recipes and filter/easing helpers derived

@@ -21,7 +21,7 @@ For any 3D or custom Canvas style (`stageMode: '3d-pure'` or `'hybrid'`):
 2. **`world.js` (Default Showcase Story)**:
    - Imports `./kernel.js` and `../../engine/camera.js` to build the style's default 4-scene showcase film.
    - **Zero Demo Asset Reuse Rule**: Future AI runs authoring a video for a user topic MUST import `./kernel.js` and create original models/scenes for that topic—never copy the default showcase props into unrelated stories.
-3. **Never include the gallery mascot** (`Star-Spark Slime / 星芒史莱姆` is strictly reserved for `showcase/`).
+3. **Never include the gallery mascot** (`Star-Spark Slime / 星芒史莱姆` is strictly reserved for promo material outside this repository).
 
 ## 3. Rendering Pipeline, Camera Grammar & Shader Recipe (渲染管线与运镜配置)
 - **Camera Choreography (`engine/camera.js`)**:

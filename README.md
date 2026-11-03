@@ -162,16 +162,7 @@ styles/            多场景风格目录：
                    - ink-wash/（宣纸水墨诗卷 · 多笔毫飞白/披麻皴生成式原语 + 宣纸洇墨着色器）
                    - vintage-naturalist/（复古博物学 · 铜版画蚀刻/黄铜仪表内核 + 15s 雀喙标本样片 + 23px 字号红线）
                    - calibration-lab/（计量实验室 · 纯 3D 机械剖视：刻线台面 + 世界空间剖切 + 分阶段爆炸 + 同源仪表 HUD + samples.json 采样层）
-showcase/          宣发物料与历史归档（画廊吉祥物「星芒史莱姆」九界短片等，与 styles/ 完全解耦）
 ```
-
----
-
-## 吉祥物「星芒史莱姆」与去固有化原则
-
-星芒史莱姆（Star-Spark Slime）是 StyleHop 的画廊宣传吉祥物，**仅出现在宣发物料与 [`showcase/`](showcase/README.md) 历史短片归档中，绝不进入任何 `styles/` 风格定义与制作流程**。
-
-![World 09 · Blueprint](showcase/worlds/world_09_blueprint/contact_sheet_09.png)
 
 ---
 
