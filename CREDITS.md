@@ -37,6 +37,12 @@ This project builds upon the architecture, procedural audio synthesis, and sound
 - **soundfile** ([libsndfile](https://github.com/libsndfile/libsndfile)): BSD-3-Clause; used only when `--voice` reads/writes WAV.
 - ChatTTS, F5-TTS, Spark-TTS, Fish Speech and similar CC-BY-NC / CC-BY-NC-SA weights are **not** supported for deliverable output and are not bundled.
 
+### D. `teardown` (Claude skill, MIT) — method borrowed, ADR-021
+- **Source**: the `teardown` skill by `elvarofficial` (MIT; license text in [LICENSE-THIRD-PARTY](LICENSE-THIRD-PARTY) §3). Its mechanical-nautilus work is where the machine-feel lessons come from.
+- **What was taken**: *behaviours and numeric lessons only*, re-implemented for this engine in `styles/calibration-lab/kernel.js` §8 (`cutWindow` / `windowRim`, `seamHardware`, `toothedRingGeometry` / `ringStack`, `radialFins`, `curveSleeve`, `wearMaps`, `createLod` + `lodScaleIn` / `lodLerpMaterial`, `metalReport`, material roles `metal` / `glaze` / `liner` / `emissive`) and in the gates of `tools/lookcheck.py` (`--gates`: silhouette IoU, machine-feel density with upper bounds) and `tools/audit.mjs` (framing). The structure of several functions follows teardown's `kit/mech.js` and `kit/lod.js`, hence this entry and the license text.
+- **What changed**: every distribution parameter is required (no good-looking defaults; a missing one throws), no species / object names, colours come from the caller, the machine-feel gate gets an upper bound and per-cell relief for deliberately quiet plates, the silhouette gate only runs when a product declares a reference.
+- **What is NOT included**: no nautilus mesh, tentacle data, palette, shot list, console UI or concept image; no teardown file is vendored or imported at runtime. Its reference images are not licensed with the code and are not used.
+
 ---
 
 ## 3. Audio Sample Libraries & Fitted Foley Attribution

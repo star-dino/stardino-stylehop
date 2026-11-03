@@ -15,6 +15,15 @@
  *   of the light changes (softbox highlights, directional occlusion).
  *   Verify any change with `python3 tools/lookcheck.py --style <id>`.
  *
+ * ref.json drives defaults (ADR-021 colour/light gate work): `lookFromRefPalette(palette)` turns a product's declared
+ *   palette (background / shell / mechanism / accent / glow / warm_metal / light.kelvin) into a look layer that sits
+ *   BETWEEN the style defaults and the product's own `style.look` (product overrides still win). No palette -> `{}`,
+ *   so products that do not declare one render exactly as before.
+ * Role studio (ADR-021): when a world uses `glaze` / `metal` material roles, `augmentLookForRoles` gives the studio a
+ *   softbox environment (`env.softboxRig`: bright panels in a darker surround, so metal has something bright to reflect),
+ *   `keyRatio >= 3` (key >= 3x the sum of fills) and a rim light (`light.rim`). Opt out per item or wholesale with
+ *   `look.studio = { auto: false }` / `{ softbox: false, keyRatio: false, rim: false }`. Looks without those roles are untouched.
+ *
  * Usage: styles normally go through `engine/studio3d.js -> createStudio3D`, which creates the
  * rig, the per-scene look timeline and the director. Direct use:
  *   const look = createLookRig(THREE, { renderer, scene, look: resolveLook(DEFAULTS, style.look) });
@@ -82,6 +91,8 @@ export const LOOK_DEFAULTS = {
     depthPhi: 2.0,
     normalPhi: 3.0,
     resolutionScale: 1.0,
+    inkStrength: 0.0,
+    inkColor: '#181C22',
   },
 };
 
@@ -165,6 +176,116 @@ export function resolveLook(...layers) {
     }
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------------------------- ref.json palette -> look
+
+function hexToRgb(h) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(h).trim());
+  if (!m) throw new Error(`look: bad colour "${h}" (need #RRGGBB)`);
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgbToHex(rgb) {
+  return '#' + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('');
+}
+function mixHex(a, b, t) {
+  const A = hexToRgb(a), B = hexToRgb(b);
+  return rgbToHex(A.map((v, i) => v + (B[i] - v) * t));
+}
+
+/** Black-body colour (Tanner Helland fit), Kelvin -> '#RRGGBB'. 6500 K ~ white. */
+export function kelvinToHex(k) {
+  const t = Math.max(1000, Math.min(12000, k)) / 100;
+  const r = t <= 66 ? 255 : 329.698727446 * Math.pow(t - 60, -0.1332047592);
+  const g = t <= 66 ? 99.4708025861 * Math.log(t) - 161.1195681661 : 288.1221695283 * Math.pow(t - 60, -0.0755148492);
+  const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5177312231 * Math.log(t - 10) - 305.0447927307;
+  return rgbToHex([r, g, b]);
+}
+
+/**
+ * Normalised ref.json palette. Canonical keys: background, shell, mechanism, accent, glow (+ optional warm_metal,
+ * light.kelvin). The older nested form `palette.sampled_hex` is accepted through a fixed alias table so existing
+ * ref.json files keep working: studio_backdrop->background, shell_glaze_mid->shell, mechanism_dark_steel->mechanism,
+ * focal_accent_orange->accent, eye_emissive_orange->glow, mechanism_muted_bronze->warm_metal.
+ * Returns null when nothing usable is declared (-> nothing is derived).
+ */
+export function normalizeRefPalette(ref) {
+  const p = ref && ref.palette;
+  if (!p || typeof p !== 'object') return null;
+  const hx = p.sampled_hex || {};
+  const pick = (...c) => c.find((v) => typeof v === 'string' && /^#?[0-9a-f]{6}$/i.test(v));
+  const out = {
+    background: pick(p.background, hx.studio_backdrop),
+    shell: pick(p.shell, hx.shell_glaze_mid),
+    mechanism: pick(p.mechanism, hx.mechanism_dark_steel),
+    accent: pick(p.accent, hx.focal_accent_orange),
+    glow: pick(p.glow, hx.eye_emissive_orange),
+    warm_metal: pick(p.warm_metal, hx.mechanism_muted_bronze),
+    kelvin: typeof p.light?.kelvin === 'number' ? p.light.kelvin : undefined,
+  };
+  for (const k of ['background', 'shell', 'mechanism', 'accent', 'glow', 'warm_metal']) if (out[k] && out[k][0] !== '#') out[k] = '#' + out[k];
+  return Object.values(out).some((v) => v !== undefined) ? out : null;
+}
+
+/**
+ * Look layer derived from a declared palette (empty object if none). Only what the palette says is touched:
+ *   background -> backdrop.color (fog takes the same colour), light.sky = background lifted 25% toward white,
+ *   light.ground = background darkened 22% (so the bounce from floor/air carries the reference's temperature, not the
+ *   style's cool grey);  light.kelvin -> key colour (a 6500 K key is neutral), bounce colour = background.
+ * The style keeps structure (illuminance, keyRatio, shadow, AO, env); products still override any leaf via style.look.
+ */
+export function lookFromRefPalette(ref) {
+  const p = normalizeRefPalette(ref);
+  if (!p) return {};
+  const out = {};
+  if (p.background) {
+    out.backdrop = { color: p.background };
+    out.light = {
+      sky: mixHex(p.background, '#ffffff', 0.25),
+      ground: mixHex(p.background, '#000000', 0.22),
+      bounce: { color: p.background },
+    };
+  }
+  if (p.kelvin) {
+    out.light = out.light || {};
+    out.light.key = { color: kelvinToHex(p.kelvin) };
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------------- role studio
+
+/**
+ * Give a look the studio that `glaze` / `metal` roles need (see header). `roles` = { glaze: bool, metal: bool }.
+ * Pure: returns { look, applied } where `applied` lists what was added (empty when nothing was needed / opted out).
+ */
+export function augmentLookForRoles(look, roles) {
+  const applied = [];
+  if (!roles || !(roles.glaze || roles.metal) || look.studio?.auto === false) return { look, applied };
+  const opt = look.studio || {};
+  const L = { ...look, light: { ...look.light }, env: { ...look.env } };
+  if (opt.softbox !== false && !L.env.softboxRig) {
+    L.env.softboxRig = true;
+    L.env.enabled = true;
+    applied.push('softbox environment');
+  }
+  if (opt.keyRatio !== false && L.light.keyRatio < 3) {
+    L.light.keyRatio = 3;
+    applied.push('keyRatio>=3');
+  }
+  if (opt.rim !== false && !L.light.rim) {
+    const k = L.light.key.pos;
+    L.light.rim = { color: L.light.key.color, pos: [-k[0] * 0.9, Math.max(6, k[1] * 0.55), -Math.max(8, Math.abs(k[2]) * 1.4)], ratio: 0.32 };
+    applied.push('rim light');
+  }
+  return { look: L, applied };
+}
+
+/** Key must carry >= 3x the summed fills (hemisphere + bounce + IBL); a rim light is an accent and not counted. */
+export function lightRatioReport(look) {
+  const b = computeLightBudget(look);
+  return { key: b.key, fills: b.ambient, ratio: b.key / Math.max(b.ambient, 1e-9), rim: look.light.rim ? b.key * (look.light.rim.ratio ?? 0.3) : 0 };
 }
 
 /** Split the fixed illuminance budget into per-source intensities. */
@@ -264,8 +385,53 @@ function buildEnvironment(THREE, renderer, look, sharedPmrem = null) {
     }
   }
 
-  const solidAngle = (boxW * boxH) / (dist * dist);
-  const upGain = 1 + (luminance(softboxColor) * solidAngle * Math.max(keyDir.y, 0)) / (Math.PI * luminance(sky));
+  let solidAngle = (boxW * boxH) / (dist * dist);
+  let upGain = 1 + (luminance(softboxColor) * solidAngle * Math.max(keyDir.y, 0)) / (Math.PI * luminance(sky));
+
+  if (look.env.softboxRig) {
+    // Softbox rig (role studio, after teardown's studioEnvironment, written for this engine): bright panels against a
+    // DARKER surround. A metal shows only what it reflects: a uniformly pale env makes grey plastic, a uniformly dark
+    // one makes black holes; panels give the highlight bands, the dark between them the contrast. The generic softbox
+    // and strips above are dropped, the dome is darkened to `env.surround` (default: 30% of sky) with a dim floor, and
+    // `upGain` is recomputed so the diffuse IBL level stays what the energy budget says (only the quality changes).
+    for (const o of envScene.children.slice()) envScene.remove(o);
+    const surround = look.env.surround ? new THREE.Color(look.env.surround) : sky.clone().multiplyScalar(0.3);
+    const floor = ground.clone().multiplyScalar(0.55);
+    const dome2 = new THREE.SphereGeometry(50, 32, 16);
+    const col2 = [];
+    for (let i = 0; i < pos.count; i++) {
+      const t = THREE.MathUtils.smoothstep(pos.getY(i) / 50, -0.35, 0.35);
+      c.copy(floor).lerp(surround, t);
+      col2.push(c.r, c.g, c.b);
+    }
+    dome2.setAttribute('color', new THREE.Float32BufferAttribute(col2, 3));
+    envScene.add(new THREE.Mesh(dome2, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+    const kc = new THREE.Color(look.light.key.color);
+    const rimC = new THREE.Color(look.light.rim?.color || look.light.key.color);
+    const white = new THREE.Color('#ffffff');
+    // [w, h, position, colour, radiance] : top, key side, rim side, thin front strip for edge glints, dim front card
+    // (faces turned to the camera reflect the card instead of the dark surround, so they read as polished, not as holes)
+    const kd = new THREE.Vector3(...look.light.key.pos).normalize().multiplyScalar(26);
+    const rd = look.light.rim ? new THREE.Vector3(...look.light.rim.pos).normalize().multiplyScalar(26) : new THREE.Vector3(-kd.x, 12, -kd.z);
+    const gain = look.env.softbox / 3.2;
+    const boxes = [
+      [28, 22, [2, 24, 6], white.clone().lerp(kc, 0.25), 3.4 * gain],
+      [18, 22, kd.toArray(), kc.clone(), 2.8 * gain],
+      [14, 24, rd.toArray(), rimC.clone(), 2.4 * gain],
+      [26, 5, [0, 8, 24], white.clone(), 2.2 * gain],
+      [26, 14, [-4, -1, 26], white.clone().lerp(kc, 0.3), 1.15 * gain],
+    ];
+    let boxIrr = 0;
+    for (const [w, h, p3, col, k] of boxes) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: col.clone().multiplyScalar(k), side: THREE.DoubleSide }));
+      m.position.set(...p3);
+      m.lookAt(0, 0, 0);
+      envScene.add(m);
+      const d = Math.hypot(...p3);
+      boxIrr += luminance(col) * k * ((w * h) / (d * d)) * Math.max(p3[1] / d, 0);
+    }
+    upGain = Math.max(0.25, (Math.PI * luminance(surround) + boxIrr) / (Math.PI * luminance(sky)));
+  }
 
   const pmrem = sharedPmrem || new THREE.PMREMGenerator(renderer);
   const texture = pmrem.fromScene(envScene, 0.04).texture;
@@ -550,7 +716,10 @@ export function createLookRig(THREE, { renderer, scene, look }) {
   if (sh.radius !== undefined) key.shadow.radius = sh.radius;
   if (sh.blurSamples !== undefined) key.shadow.blurSamples = sh.blurSamples;
   const bounce = new THREE.DirectionalLight();
-  rig.add(hemi, key, bounce);
+  const rim = new THREE.DirectionalLight(); // role studio / look.light.rim; hidden (not counted by three) unless declared
+  rim.castShadow = false;
+  rim.visible = false;
+  rig.add(hemi, key, bounce, rim);
   scene.add(rig);
 
   const contact = look.contact.enabled ? buildContactShadow(THREE, look) : null;
@@ -562,7 +731,7 @@ export function createLookRig(THREE, { renderer, scene, look }) {
   const envCache = new Map();
   let sharedPmrem = null;
   function envFor(l) {
-    const k = JSON.stringify([l.light.sky, l.light.ground, l.light.key.color, l.light.key.pos, l.env.softbox, Boolean(l.env.studioStrips)]);
+    const k = JSON.stringify([l.light.sky, l.light.ground, l.light.key.color, l.light.key.pos, l.env.softbox, Boolean(l.env.studioStrips), Boolean(l.env.softboxRig), l.env.surround || '', l.light.rim?.color || '', l.light.rim?.pos || '']);
     if (!envCache.has(k)) {
       if (envCache.size >= 24) {
         const [oldKey, old] = envCache.entries().next().value;
@@ -586,13 +755,32 @@ export function createLookRig(THREE, { renderer, scene, look }) {
   const seen = new WeakSet();
   let envIntensity = 0;
   let current = null;
+  let fogBase = 0;
+  let fogScale = 1; // director `cinema.fog`: density multiplier (1 = unchanged)
   let budget = null;
   let lastChildCount = -1;
   let syncFrames = 0;
   let materialsDirty = true;
 
+  let roleDemand = null; // { glaze, metal } set by the style kernel when a world uses those material roles
+  let studioApplied = [];
+  let lastIn = null;
+  // Softbox rig only: the energy budget keeps the DIFFUSE IBL level, but a metal has no diffuse term, its whole look is the
+  // reflection, so it would sit at ~17% radiance. Metals / glaze take a role gain on the env intensity (env.roleGain, default
+  // metal x4, glaze x2); matte materials are untouched. Without the rig the gain is 1 (nothing changes).
+  let roleGain = { metal: 1, glaze: 1 };
+  const envScaleOf = (m) => (m.userData?.envMapScale ?? 1.0) * (roleGain[m.userData?.role] ?? 1);
   function apply(next, { envLook = next } = {}) {
+    lastIn = { next, envLook };
+    if (roleDemand) {
+      const a = augmentLookForRoles(next, roleDemand);
+      const e = envLook === next ? a.look : augmentLookForRoles(envLook, roleDemand).look;
+      studioApplied = a.applied;
+      next = a.look;
+      envLook = e;
+    }
     current = next;
+    roleGain = next.env.softboxRig ? { metal: 4, glaze: 2, ...(next.env.roleGain || {}) } : { metal: 1, glaze: 1 };
     budget = computeLightBudget(next);
     const L = next.light;
     renderer.toneMappingExposure = next.color.exposure;
@@ -605,7 +793,8 @@ export function createLookRig(THREE, { renderer, scene, look }) {
       scene.background = bgColor;
       fog.color.set(next.backdrop.color);
     }
-    fog.density = next.backdrop.fog;
+    fogBase = next.backdrop.fog;
+    fog.density = fogBase * fogScale;
 
     hemi.color.set(L.sky);
     hemi.groundColor.set(L.ground);
@@ -617,6 +806,14 @@ export function createLookRig(THREE, { renderer, scene, look }) {
     bounce.intensity = budget.bounce;
     if (L.bounce?.pos) bounce.position.set(...L.bounce.pos);
     bounce.visible = budget.bounce > 0;
+    if (L.rim) {
+      rim.visible = true;
+      rim.color.set(L.rim.color || L.key.color);
+      rim.intensity = budget.key * (L.rim.ratio ?? 0.3);
+      rim.position.set(...L.rim.pos);
+    } else {
+      rim.visible = false;
+    }
 
     if (look.env.enabled && budget.env > 0) {
       const env = envFor(envLook);
@@ -626,7 +823,7 @@ export function createLookRig(THREE, { renderer, scene, look }) {
       scene.environment = null;
       envIntensity = 0;
     }
-    for (const m of tracked) m.envMapIntensity = envIntensity;
+    for (const m of tracked) m.envMapIntensity = envIntensity * envScaleOf(m);
     if (contact) contact.setOpacity(next.contact.opacity);
     if (next.ao?.enabled) {
       if (!gtao) gtao = createGTAORig(THREE, { renderer, scene, options: next.ao });
@@ -648,7 +845,7 @@ export function createLookRig(THREE, { renderer, scene, look }) {
         if (seen.has(m)) continue;
         seen.add(m);
         if (m.isMeshStandardMaterial && m.userData.lookEnv !== false) {
-          m.envMapIntensity = envIntensity;
+          m.envMapIntensity = envIntensity * envScaleOf(m);
           tracked.push(m);
         }
         for (const slot of ['map', 'emissiveMap']) {
@@ -732,6 +929,20 @@ export function createLookRig(THREE, { renderer, scene, look }) {
     lights: { hemi, key, bounce },
     gtao,
     apply,
+    /** Style kernel reports which material roles the world uses; the role studio is (re)applied. */
+    setRoleDemand(d) {
+      const same = roleDemand && roleDemand.glaze === d.glaze && roleDemand.metal === d.metal;
+      if (same) return;
+      roleDemand = { glaze: Boolean(d.glaze), metal: Boolean(d.metal) };
+      if (lastIn) apply(lastIn.next, { envLook: lastIn.envLook });
+    },
+    get studioApplied() {
+      return studioApplied;
+    },
+    setFogScale(s) {
+      fogScale = s;
+      if (fogBase) fog.density = fogBase * s;
+    },
     prewarm,
     render,
     syncMaterials,

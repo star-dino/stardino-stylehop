@@ -153,15 +153,27 @@ PRESETS = {
     },
     "terminal": {
         "chords": [
-            [146.83, 220.00, 293.66, 349.23, 440.00],
-            [130.81, 196.00, 261.63, 329.63, 392.00],
-            [116.54, 174.61, 233.08, 293.66, 349.23],
-            [110.00, 164.81, 220.00, 277.18, 329.63],
+            [55.00, 82.41, 110.00, 146.83],
+            [49.00, 73.42, 98.00, 130.81],
+            [58.27, 87.31, 116.54, 146.83],
+            [55.00, 82.41, 110.00, 138.59],
         ],
-        "pad_gain": 0.13,
-        "chime_freqs": [880.00, 1174.66, 1318.51, 1760.00],
-        "tap_freq": 720.0,
-        "tick_freq": 2400.0,
+        "pad_gain": 0.09,
+        "chime_freqs": [165.00, 220.00, 246.94, 293.66],
+        "tap_freq": 185.0,
+        "tick_freq": 280.0,
+    },
+    "mech": {
+        "chords": [
+            [55.00, 82.41, 110.00, 146.83],
+            [49.00, 73.42, 98.00, 130.81],
+            [58.27, 87.31, 116.54, 146.83],
+            [55.00, 82.41, 110.00, 138.59],
+        ],
+        "pad_gain": 0.09,
+        "chime_freqs": [165.00, 220.00, 246.94, 293.66],
+        "tap_freq": 185.0,
+        "tick_freq": 280.0,
     },
 }
 
@@ -179,7 +191,10 @@ PRESET_ALIASES = {
     "twilight-fable": "twilight",
     "vintage-naturalist": "naturalist",
     "copperplate": "naturalist",
-    "crt_synth": "terminal",
+    "crt_synth": "mech",
+    "terminal": "mech",
+    "industrial-mech": "mech",
+    "calibration-lab": "mech",
     "blueprint_mech": "cyber",
 }
 
@@ -1701,6 +1716,93 @@ def synth_naturalist_chamber_bed(
     return stereo * pocket[:, None]
 
 
+def synth_industrial_mech_bed(
+    dur: float,
+    scenes: list,
+    cfg: dict,
+    rng: np.random.Generator,
+    cues: list = None,
+    sig: dict = None,
+) -> np.ndarray:
+    """
+    Pure Diegetic Mechanical & Hydraulic Acoustic Bed (`mech` / `industrial-mech` / `calibration-lab`):
+      - ZERO musical chords, ZERO synth pads, ZERO high-frequency chimes/beeps.
+      - Layer 1: Deep-sea / laboratory hydraulic pump & fluid flow bed (38-135 Hz low-passed pink/brown noise
+        + damped 52 Hz turbine fundamental with gentle kinematic breathing).
+      - Layer 2: Cyclic mechanical power-stroke / propulsion thud cadence (soft 56-74 Hz damped sub-thumps
+        paired with low-mid pneumatic valve breaths, inspired by teardown's score_kit.thud & airy).
+      - Layer 3: Per-scene servo/actuator gimbal glide on camera & subsystem transitions.
+    """
+    sig = sig or _derive_topic_signature({"scenes": scenes, "cues": cues})
+    n_samples = int(round(dur * SR))
+    stereo = np.zeros((n_samples, 2), dtype=np.float64)
+    if not scenes:
+        scenes = [{"start": 0.0, "dur": dur, "end": dur}]
+
+    t_full = np.arange(n_samples, dtype=np.float64) / SR
+
+    # 1. Continuous deep hydraulic & fluid flow bed (warm 38-135 Hz low-passed pink noise + 52 Hz pump hum)
+    pink_l = generate_pink_noise(n_samples, rng)
+    pink_r = generate_pink_noise(n_samples, rng)
+    fc_flow = 88.0 + 28.0 * np.sin(2.0 * np.pi * 0.42 * t_full) + 14.0 * np.sin(2.0 * np.pi * 1.15 * t_full)
+    flow_l = time_varying_bandpass(pink_l, fc_flow, btype="low") * 0.085
+    flow_r = time_varying_bandpass(pink_r, fc_flow * 1.04, btype="low") * 0.085
+
+    # Subtle 52 Hz hydraulic pump fundamental + 104 Hz second harmonic (heavily damped, warm)
+    f_pump = 52.0 * (1.0 + 0.018 * np.sin(2.0 * np.pi * 0.35 * t_full))
+    ph_pump = 2.0 * np.pi * np.cumsum(f_pump) / SR
+    pump_mod = 0.78 + 0.22 * np.sin(2.0 * np.pi * 1.35 * t_full)
+    pump_hum = (np.sin(ph_pump) + 0.28 * np.sin(2.0 * ph_pump)) * pump_mod * 0.042
+
+    stereo[:, 0] += flow_l + pump_hum * 0.96
+    stereo[:, 1] += flow_r + pump_hum * 1.04
+
+    # 2. Cyclic mechanical power-stroke thuds & soft valve air across scenes
+    for idx, sc in enumerate(scenes):
+        start_t = float(sc.get("start", 0.0))
+        sc_dur = float(sc.get("dur", max(1.0, dur - start_t)))
+        stroke_period = 0.74 if idx in (1, 2) else 0.84
+        t_cursor = start_t + 0.22
+        stroke_i = 0
+        while t_cursor < min(dur - 0.25, start_t + sc_dur - 0.15):
+            thud_dur = 0.32
+            n_th = int(round(thud_dur * SR))
+            t_th = np.arange(n_th, dtype=np.float64) / SR
+            f_th = (64.0 if (stroke_i % 2 == 0) else 56.0) + 28.0 * np.exp(-t_th / 0.028)
+            ph_th = 2.0 * np.pi * np.cumsum(f_th) / SR
+            att_th = np.clip(t_th / 0.005, 0.0, 1.0)
+            thud_sig = np.sin(ph_th) * np.exp(-t_th / 0.085) * att_th * 0.068
+
+            air_noise = generate_pink_noise(n_th, rng)
+            air_fc = 190.0 + 140.0 * np.sin(np.pi * t_th / thud_dur)
+            air_sig = time_varying_bandpass(air_noise, air_fc, q=1.4, btype="bandpass") * np.sin(np.pi * t_th / thud_dur) * 0.028
+
+            pan_pos = -0.16 if (stroke_i % 2 == 0) else 0.16
+            mix_into(stereo, int(round(t_cursor * SR)), thud_sig + air_sig, pan=pan_pos)
+            t_cursor += stroke_period
+            stroke_i += 1
+
+        # 3. Scene-opening gimbal servo & pneumatic actuator transit
+        servo_dur = min(1.15, sc_dur * 0.35)
+        if servo_dur > 0.25:
+            n_sv = int(round(servo_dur * SR))
+            t_sv = np.arange(n_sv, dtype=np.float64) / SR
+            env_sv = np.sin(np.pi * t_sv / servo_dur) ** 1.15
+            f_rot = 135.0 + 42.0 * np.sin(np.pi * t_sv / servo_dur)
+            ph_rot = 2.0 * np.pi * np.cumsum(f_rot) / SR
+            rotor = (np.sin(ph_rot) + 0.32 * np.sin(2.0 * ph_rot)) * env_sv * 0.024
+            sv_air = time_varying_bandpass(
+                generate_pink_noise(n_sv, rng),
+                240.0 + 220.0 * np.sin(np.pi * t_sv / servo_dur),
+                q=1.2,
+                btype="bandpass",
+            ) * env_sv * 0.036
+            mix_into(stereo, int(round((start_t + 0.06) * SR)), rotor + sv_air, pan=0.12 if idx % 2 == 0 else -0.12)
+
+    pocket = _build_foley_pocket_mask(n_samples, scenes, cues, duck_floor=0.68)
+    return fade_in_out(stereo * pocket[:, None], 0.18, 0.35)
+
+
 def synth_ambient_bed(dur: float, scenes: list, cfg: dict, rng: np.random.Generator) -> np.ndarray:
     """Synthesizes a warm evolving stereo harmonic pad across scenes (for glass/cyber/terminal)."""
     n_samples = int(round(dur * SR))
@@ -1806,6 +1908,19 @@ def synth_scene_cut(cfg: dict, preset: str, intensity: float, idx: int, rng: np.
         out[: len(squish)] += squish
         return out * intensity
 
+    if preset in ("mech", "terminal"):
+        dur = 0.58
+        n = int(round(dur * SR))
+        t = np.arange(n, dtype=np.float64) / SR
+        f_sub = 48.0 + 54.0 * np.exp(-t / 0.038)
+        sub_thud = np.sin(2.0 * np.pi * np.cumsum(f_sub) / SR) * np.exp(-t / 0.13) * np.clip(t / 0.004, 0.0, 1.0) * 0.42
+        noise = generate_pink_noise(n, rng)
+        air_release = time_varying_bandpass(noise, 180.0 + 340.0 * np.exp(-t / 0.18), 1.5) * np.sin(np.pi * np.clip(t / 0.38, 0.0, 1.0)) * 0.24
+        clunk = modal_strike(168.0, 0.18, "wood", rng, amp=0.22)
+        out = sub_thud + air_release
+        out[: min(n, len(clunk))] += clunk[: min(n, len(clunk))]
+        return out * intensity
+
     dur = 0.68
     n = int(round(dur * SR))
     t = np.arange(n, dtype=np.float64) / SR
@@ -1857,6 +1972,14 @@ def synth_card_enter(cfg: dict, preset: str, intensity: float, idx: int, rng: np
         strike = modal_strike(f0 * 0.8, dur, "wood", rng, amp=0.22)
         grain = slice_grain("silk_brush_grain", n, rng, gain=0.40)
         return (strike[:n] + grain) * intensity
+    if preset in ("mech", "terminal"):
+        dur = 0.18
+        n = int(round(dur * SR))
+        t = np.arange(n, dtype=np.float64) / SR
+        f_thock = (145.0 + 65.0 * np.exp(-t / 0.018)) * (0.94 + 0.04 * (idx % 3))
+        thock = np.sin(2.0 * np.pi * np.cumsum(f_thock) / SR) * np.exp(-t / 0.042) * np.clip(t / 0.002, 0.0, 1.0) * 0.30
+        detent = modal_strike(240.0, dur, "wood", rng, amp=0.18)
+        return (thock + detent[:n]) * intensity
     return modal_strike(f0, 0.20, "wood", rng, amp=0.26) * intensity
 
 
@@ -1882,6 +2005,12 @@ def synth_layer_float(cfg: dict, preset: str, intensity: float, idx: int, rng: n
         return (strike[:n] + grain) * intensity
     if preset == "jazz":
         return synth_wah_brass_note(f1, 0.36, wah_open=0.75, rng=rng, gliss=0.05) * (0.65 * intensity)
+    if preset in ("mech", "terminal"):
+        t = np.arange(n, dtype=np.float64) / SR
+        noise = generate_pink_noise(n, rng)
+        glide = time_varying_bandpass(noise, 190.0 + 220.0 * np.sin(np.pi * t / dur), 1.6) * np.sin(np.pi * t / dur) * 0.22
+        stop_thud = np.sin(2.0 * np.pi * 68.0 * t) * np.exp(-t / 0.09) * np.clip(t / 0.005, 0.0, 1.0) * 0.18
+        return (glide + stop_thud) * intensity
     t = np.arange(n, dtype=np.float64) / SR
     f2 = f1 * 1.25
     env = np.sin(np.pi * np.clip(t / dur, 0.0, 1.0)) * np.exp(-t / 0.24)
@@ -1908,6 +2037,13 @@ def synth_count_tick(cfg: dict, preset: str, intensity: float, idx: int, rng: np
     if preset == "jazz":
         n = int(round(0.08 * SR))
         return modal_strike(f0 * 0.9, 0.08, "wood", rng, amp=0.26 * intensity)[:n]
+    if preset in ("mech", "terminal"):
+        dur = 0.048
+        n = int(round(dur * SR))
+        t = np.arange(n, dtype=np.float64) / SR
+        thock = np.sin(2.0 * np.pi * (210.0 + 18.0 * (idx % 3)) * t) * np.exp(-t / 0.009) * 0.16
+        burst = time_varying_bandpass(generate_pink_noise(n, rng), 420.0, 1.8) * np.exp(-t / 0.004) * 0.12
+        return fade_in_out((thock + burst) * intensity, 0.0005, 0.008)
     dur = 0.055
     n = int(round(dur * SR))
     t = np.arange(n, dtype=np.float64) / SR
@@ -2072,6 +2208,22 @@ def synth_runtime_foley(
         return (pin_ping[:n] + wood_thud[:n] + paper) * intensity
 
     if kind == "brass_ratchet":
+        if preset in ("mech", "terminal"):
+            dur = 0.42
+            n = int(round(dur * SR))
+            t = np.arange(n, dtype=np.float64) / SR
+            out = np.zeros(n, dtype=np.float64)
+            for click_i, t_off in enumerate((0.01, 0.085, 0.165, 0.255)):
+                s0 = int(round(t_off * SR))
+                c_len = min(int(0.065 * SR), n - s0)
+                if c_len > 8:
+                    tc = np.arange(c_len, dtype=np.float64) / SR
+                    f_det = (185.0 + 22.0 * click_i) * p_scale
+                    det = np.sin(2.0 * np.pi * f_det * tc) * np.exp(-tc / 0.012) * 0.24
+                    clunk = modal_strike(260.0 * p_scale, 0.065, "wood", rng, amp=0.18)
+                    out[s0 : s0 + c_len] += det + clunk[:c_len]
+            flow = time_varying_bandpass(generate_pink_noise(n, rng), 220.0 * p_scale, 1.6) * np.sin(np.pi * t / dur) * 0.16
+            return fade_in_out((out + flow) * intensity, 0.002, 0.02)
         dur = 0.44
         n = int(round(dur * SR))
         grain = slice_grain("brass_escapement_grain", n, rng, gain=0.75)
@@ -2079,6 +2231,16 @@ def synth_runtime_foley(
         return (grain + bell[:n]) * intensity
 
     if kind == "scale_tilt":
+        if preset in ("mech", "terminal"):
+            dur = 0.50
+            n = int(round(dur * SR))
+            t = np.arange(n, dtype=np.float64) / SR
+            f_servo = (128.0 + 48.0 * np.sin(np.pi * t / dur)) * p_scale
+            ph_servo = 2.0 * np.pi * np.cumsum(f_servo) / SR
+            servo = (np.sin(ph_servo) + 0.35 * np.sin(2.0 * ph_servo)) * np.sin(np.pi * t / dur) * 0.18
+            valve = time_varying_bandpass(generate_pink_noise(n, rng), (240.0 + 160.0 * np.sin(np.pi * t / dur)) * p_scale, 1.8) * np.sin(np.pi * t / dur) * 0.20
+            lock_thud = np.sin(2.0 * np.pi * 74.0 * t) * np.exp(-t / 0.095) * np.clip(t / 0.004, 0.0, 1.0) * 0.28
+            return fade_in_out((servo + valve + lock_thud) * intensity, 0.003, 0.025)
         dur = 0.52
         n = int(round(dur * SR))
         t = np.arange(n, dtype=np.float64) / SR
@@ -2536,6 +2698,10 @@ def master_bus(stereo: np.ndarray, preset: str = "glass", ceiling_db: float = -1
         # Warm picture-book nocturnal tone: roll off harsh highs above 2.6 kHz
         sos_lp = signal.butter(2, 2600.0 / (0.5 * SR), btype="low", output="sos")
         out = signal.sosfilt(sos_lp, out, axis=0)
+    elif preset in ("mech", "terminal"):
+        # Warm heavy-machinery / deep-sea lab acoustic roll-off at 2.2 kHz: zero harsh metallic/electronic highs
+        sos_lp = signal.butter(2, 2200.0 / (0.5 * SR), btype="low", output="sos")
+        out = signal.sosfilt(sos_lp, out, axis=0)
     elif preset == "ink":
         # Warm Song-Yuan silk-scroll Guqin/Xiao tone: roll off harsh highs above 3.8 kHz
         sos_lp = signal.butter(2, 3800.0 / (0.5 * SR), btype="low", output="sos")
@@ -2554,8 +2720,8 @@ def master_bus(stereo: np.ndarray, preset: str = "glass", ceiling_db: float = -1
         active_rms = np.sqrt(np.mean(out ** 2) + 1e-12)
 
     # Preserve wide Crest Factor for dramatic ink-wash & gentle twilight scores while keeping healthy loudness
-    target_rms = 0.095 if preset == "twilight" else (0.115 if preset == "ink" else 0.135)
-    max_gain = 1.8 if preset == "twilight" else (2.4 if preset == "ink" else 3.6)
+    target_rms = 0.095 if preset in ("twilight", "mech", "terminal") else (0.115 if preset == "ink" else 0.135)
+    max_gain = 1.8 if preset in ("twilight", "mech", "terminal") else (2.4 if preset == "ink" else 3.6)
     gain = float(np.clip(target_rms / active_rms, 0.55, max_gain))
     out = out * gain
 
@@ -2721,6 +2887,8 @@ def synthesize_from_cues(cue_data: dict, preset: str = "glass", seed: int = 77, 
         stereo = synth_paper_harp_bed(dur, scenes, cfg, rng, cues=cues, sig=sig)
     elif preset == "twilight":
         stereo = synth_twilight_celesta_bed(dur, scenes, cfg, rng, cues=cues, sig=sig)
+    elif preset in ("mech", "terminal"):
+        stereo = synth_industrial_mech_bed(dur, scenes, cfg, rng, cues=cues, sig=sig)
     else:
         stereo = synth_ambient_bed(dur, scenes, cfg, rng)
 

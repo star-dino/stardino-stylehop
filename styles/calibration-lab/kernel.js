@@ -22,7 +22,7 @@
 
 import '../../engine/vendor/three.min.js';
 import { clamp, lerp, smootherstep } from '../../engine/motion.js';
-import { LOOK_DEFAULTS, LOOK_PRESETS, resolveLook } from '../../engine/look.js';
+import { LOOK_DEFAULTS, LOOK_PRESETS, resolveLook, lookFromRefPalette, normalizeRefPalette } from '../../engine/look.js';
 import { createStudio3D } from '../../engine/studio3d.js';
 
 export const THREE = globalThis.THREE;
@@ -100,7 +100,7 @@ export const CAL_LOOK = {
   },
   ao: {
     enabled: true,
-    intensity: 0.68,
+    intensity: 0.72,
     radius: 0.14,
     thickness: 0.55,
     distanceExponent: 1.4,
@@ -111,6 +111,8 @@ export const CAL_LOOK = {
     lumaPhi: 10.0,
     depthPhi: 2.0,
     normalPhi: 3.0,
+    inkStrength: 0.36,
+    inkColor: '#181C22',
   },
 };
 
@@ -317,7 +319,26 @@ export function createSurfaceMaps() {
   arCtx.fillRect(0, 0, 128, 128);
   const aoRadialTex = new THREE.CanvasTexture(aoRadCanvas);
 
-  cachedSurfaceMaps = { anodized, machined, cast, hatchMap, aoRadialTex };
+  // 6. High-density 45°/135° diamond-weave braided hydraulic hose relief map
+  const hBraided = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = (x / size) * Math.PI * 2 * 14;
+      const v = (y / size) * Math.PI * 2 * 14;
+      const strandA = Math.sin(u + v);
+      const strandB = Math.sin(u - v);
+      const overUnder = strandA * strandB;
+      const ridge = Math.max(Math.abs(strandA), Math.abs(strandB));
+      hBraided[y * size + x] = clamp(0.35 + ridge * 0.45 + overUnder * 0.2, 0, 1);
+    }
+  }
+  const braided = buildNormalAndRoughnessFromHeight(size, hBraided, {
+    strength: 3.4,
+    baseRough: 0.68,
+    roughSpan: 0.22,
+  });
+
+  cachedSurfaceMaps = { anodized, machined, cast, hatchMap, aoRadialTex, braided };
   return cachedSurfaceMaps;
 }
 
@@ -355,86 +376,199 @@ export function normalizeGeometryUVs(geometry, mmScale = 56) {
   return geometry;
 }
 
+/**
+ * Enforce `teardown` industrial roughness & IBL reflection discipline on a Three.js material:
+ *   - `'shell'` / `'structural'`: clamps `roughness >= 0.45`, `clearcoat <= 0.14`, and `envMapScale = 0.56`
+ *     so large housings, plates, and fairings never exhibit plastic/wet specular streaks under key light.
+ *   - `'precision'`: allows lower roughness (`>= 0.12`) and full `envMapScale = 1.0` for shafts, pins, and bearings.
+ */
+export function governIndustrialMaterial(mat, role = 'shell') {
+  if (!mat) return mat;
+  mat.userData = mat.userData || {};
+  if (MATERIAL_ROLES[role]) return governMaterialRole(mat, role);
+  if (role === 'shell' || role === 'structural') {
+    if (typeof mat.roughness === 'number') mat.roughness = Math.max(0.45, mat.roughness);
+    if (typeof mat.clearcoat === 'number') mat.clearcoat = Math.min(0.14, mat.clearcoat);
+    mat.userData.envMapScale = mat.userData.envMapScale ?? 0.56;
+  } else {
+    mat.userData.envMapScale = mat.userData.envMapScale ?? 1.0;
+  }
+  return mat;
+}
+
+/** Palette declared by the product's ref.json (set by `createCalLabStudio`); null = style defaults, unchanged. */
+let ACTIVE_REF_PALETTE = null;
+
 export function createMaterials() {
+  const mats = createMaterialsRaw();
+  const P = ACTIVE_REF_PALETTE;
+  if (!P) return mats;
+  // ref.json drives defaults: shell family <- shell, mechanism structure <- mechanism, accents <- accent, warm metals <- warm_metal.
+  // Structure (roughness, metalness, maps, roles) stays the style's; only the base colour moves. Missing keys leave the style colour.
+  const tint = (names, hex) => { if (hex) for (const n of names) mats[n]?.color?.set(hex); };
+  tint(['white', 'alu'], P.shell);
+  tint(['aluDark', 'graphite', 'titanium'], P.mechanism);
+  tint(['accent', 'accentGlow', 'anodizedRed'], P.accent);
+  tint(['bronze', 'brass'], P.warm_metal);
+  return mats;
+}
+
+function createMaterialsRaw() {
   const std = (o) => new THREE.MeshStandardMaterial(o);
   const phys = (o) => new THREE.MeshPhysicalMaterial(o);
   const maps = createSurfaceMaps();
   const v2 = (s) => new THREE.Vector2(s, s);
 
   return {
-    alu: std({
-      color: CAL_PALETTE.anodized,
-      metalness: 0.88,
-      roughness: 0.30,
-      normalMap: maps.anodized.normalMap,
-      roughnessMap: maps.anodized.roughnessMap,
-      normalScale: v2(0.14),
-    }),
-    aluDark: std({
-      color: CAL_PALETTE.anodizedDark,
-      metalness: 0.85,
-      roughness: 0.38,
-      normalMap: maps.anodized.normalMap,
-      roughnessMap: maps.anodized.roughnessMap,
-      normalScale: v2(0.16),
-    }),
-    white: phys({
-      color: CAL_PALETTE.powder,
-      metalness: 0.05,
-      roughness: 0.56,
-      clearcoat: 0.22,
-      clearcoatRoughness: 0.36,
-      normalMap: maps.cast.normalMap,
-      roughnessMap: maps.cast.roughnessMap,
-      normalScale: v2(0.18),
-    }),
-    black: phys({
-      color: CAL_PALETTE.structure,
-      metalness: 0.34,
-      roughness: 0.34,
-      clearcoat: 0.42,
-      clearcoatRoughness: 0.22,
-      normalMap: maps.cast.normalMap,
-      roughnessMap: maps.cast.roughnessMap,
-      normalScale: v2(0.20),
-    }),
-    steel: std({
-      color: CAL_PALETTE.steel,
-      metalness: 0.98,
-      roughness: 0.22,
-      normalMap: maps.machined.normalMap,
-      roughnessMap: maps.machined.roughnessMap,
-      normalScale: v2(0.18),
-    }),
-    chrome: std({
-      color: CAL_PALETTE.chrome,
-      metalness: 1.0,
-      roughness: 0.12,
-      normalMap: maps.machined.normalMap,
-      normalScale: v2(0.08),
-    }),
-    bronze: std({
-      color: CAL_PALETTE.bronze,
-      metalness: 0.92,
-      roughness: 0.28,
-      normalMap: maps.machined.normalMap,
-      roughnessMap: maps.machined.roughnessMap,
-      normalScale: v2(0.16),
-    }),
-    graphite: std({
-      color: '#464C53',
-      metalness: 0.62,
-      roughness: 0.42,
-      normalMap: maps.machined.normalMap,
-      roughnessMap: maps.machined.roughnessMap,
-      normalScale: v2(0.18),
-    }),
+    alu: governIndustrialMaterial(
+      std({
+        color: CAL_PALETTE.anodized,
+        metalness: 0.86,
+        roughness: 0.45,
+        normalMap: maps.anodized.normalMap,
+        roughnessMap: maps.anodized.roughnessMap,
+        normalScale: v2(0.16),
+      }),
+      'shell',
+    ),
+    aluDark: governIndustrialMaterial(
+      std({
+        color: CAL_PALETTE.anodizedDark,
+        metalness: 0.84,
+        roughness: 0.48,
+        normalMap: maps.anodized.normalMap,
+        roughnessMap: maps.anodized.roughnessMap,
+        normalScale: v2(0.18),
+      }),
+      'shell',
+    ),
+    titanium: governIndustrialMaterial(
+      std({
+        color: '#9AA2AD',
+        metalness: 0.85,
+        roughness: 0.46,
+        normalMap: maps.anodized.normalMap,
+        roughnessMap: maps.anodized.roughnessMap,
+        normalScale: v2(0.18),
+      }),
+      'shell',
+    ),
+    white: governIndustrialMaterial(
+      phys({
+        color: CAL_PALETTE.powder,
+        metalness: 0.06,
+        roughness: 0.56,
+        clearcoat: 0.12,
+        clearcoatRoughness: 0.42,
+        normalMap: maps.cast.normalMap,
+        roughnessMap: maps.cast.roughnessMap,
+        normalScale: v2(0.18),
+      }),
+      'shell',
+    ),
+    black: governIndustrialMaterial(
+      phys({
+        color: CAL_PALETTE.structure,
+        metalness: 0.36,
+        roughness: 0.46,
+        clearcoat: 0.14,
+        clearcoatRoughness: 0.34,
+        normalMap: maps.cast.normalMap,
+        roughnessMap: maps.cast.roughnessMap,
+        normalScale: v2(0.20),
+      }),
+      'shell',
+    ),
+    liner: governIndustrialMaterial(
+      std({
+        color: '#16191E',
+        metalness: 0.28,
+        roughness: 0.68,
+        normalMap: maps.cast.normalMap,
+        roughnessMap: maps.cast.roughnessMap,
+        normalScale: v2(0.22),
+      }),
+      'shell',
+    ),
+    steel: governIndustrialMaterial(
+      std({
+        color: CAL_PALETTE.steel,
+        metalness: 0.96,
+        roughness: 0.24,
+        normalMap: maps.machined.normalMap,
+        roughnessMap: maps.machined.roughnessMap,
+        normalScale: v2(0.18),
+      }),
+      'precision',
+    ),
+    chrome: governIndustrialMaterial(
+      std({
+        color: CAL_PALETTE.chrome,
+        metalness: 1.0,
+        roughness: 0.12,
+        normalMap: maps.machined.normalMap,
+        normalScale: v2(0.08),
+      }),
+      'precision',
+    ),
+    bronze: governIndustrialMaterial(
+      std({
+        color: CAL_PALETTE.bronze,
+        metalness: 0.92,
+        roughness: 0.28,
+        normalMap: maps.machined.normalMap,
+        roughnessMap: maps.machined.roughnessMap,
+        normalScale: v2(0.16),
+      }),
+      'precision',
+    ),
+    brass: governIndustrialMaterial(
+      std({
+        color: '#C8A24E',
+        metalness: 0.92,
+        roughness: 0.26,
+        normalMap: maps.machined.normalMap,
+        roughnessMap: maps.machined.roughnessMap,
+        normalScale: v2(0.16),
+      }),
+      'precision',
+    ),
+    anodizedRed: governIndustrialMaterial(
+      std({
+        color: '#D93824',
+        metalness: 0.78,
+        roughness: 0.36,
+        normalMap: maps.anodized.normalMap,
+        roughnessMap: maps.anodized.roughnessMap,
+        normalScale: v2(0.15),
+      }),
+      'precision',
+    ),
+    graphite: governIndustrialMaterial(
+      std({
+        color: '#464C53',
+        metalness: 0.62,
+        roughness: 0.46,
+        normalMap: maps.machined.normalMap,
+        roughnessMap: maps.machined.roughnessMap,
+        normalScale: v2(0.18),
+      }),
+      'shell',
+    ),
     rubber: std({
       color: CAL_PALETTE.rubber,
       metalness: 0.06,
       roughness: 0.88,
       normalMap: maps.cast.normalMap,
       normalScale: v2(0.24),
+    }),
+    braidedHose: std({
+      color: '#1E2126',
+      metalness: 0.18,
+      roughness: 0.70,
+      normalMap: maps.braided.normalMap,
+      roughnessMap: maps.braided.roughnessMap,
+      normalScale: v2(0.38),
     }),
     sectionCap: std({
       color: '#FFFFFF',
@@ -1134,6 +1268,443 @@ export function mergeGeometries(list) {
 }
 
 // ============================================================================
+// 3B. COMPOUND INDUSTRIAL ASSEMBLIES (DE-STICKERIZED PARAMETRIC SUB-ASSEMBLIES)
+// ============================================================================
+
+/**
+ * High-DPI Technical Silkscreen Decal (`createSilkscreenDecal`).
+ * Renders crisp `JetBrains Mono` serial numbers (`01`~`08`), inspection stencil markings,
+ * and fiducial registration ticks onto a polygon-offset decal plane flush with any shell face.
+ */
+export function createSilkscreenDecal({
+  text = '01',
+  subText = 'MOD-A',
+  width = 22,
+  height = 12,
+  fg = '#181C22',
+  accent = CAL_PALETTE.accent,
+} = {}) {
+  const c = document.createElement('canvas');
+  c.width = 256;
+  c.height = 140;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, 256, 140);
+
+  // Registration bracket & accent bar
+  g.fillStyle = accent;
+  g.fillRect(10, 18, 8, 104);
+  g.strokeStyle = fg;
+  g.lineWidth = 3;
+  g.strokeRect(10, 18, 236, 104);
+
+  // Primary stencil serial number
+  g.fillStyle = fg;
+  g.font = '800 68px "JetBrains Mono", monospace';
+  g.textBaseline = 'alphabetic';
+  g.fillText(String(text), 30, 88);
+
+  if (subText) {
+    g.font = '700 22px "JetBrains Mono", monospace';
+    g.fillStyle = '#565E68';
+    g.fillText(String(subText).toUpperCase(), 32, 114);
+  }
+
+  // Corner fiducial ticks
+  g.fillStyle = fg;
+  g.fillRect(228, 28, 10, 10);
+  g.fillRect(228, 46, 10, 4);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex,
+    transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    toneMapped: false,
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  mesh.userData.skipContactShadow = true;
+  return mesh;
+}
+
+/**
+ * Compound Segmented Bevelled Shell Panel (`segmentedShellPanel`).
+ * Replaces bare single-mesh covers with a multi-layer industrial fairing assembly (`Pelagos OC-8` standard):
+ *   1. Bevelled outer shell plate with countersunk perimeter fastener bores;
+ *   2. Recessed dark structural chassis liner (`linerMat`, inset by `partingGap`) so panel seams read
+ *      with crisp dark shadow lines even on pale white/silver shells;
+ *   3. Countersunk socket-head perimeter bolts (`boltGeometry`) + `creviceAoRing` collars;
+ *   4. Anodized red/orange mechanical quick-release latches (`accentMat`) on the parting edge;
+ *   5. Flush technical silkscreen serial number decal (`01`~`08`).
+ */
+export function segmentedShellPanel({
+  width = 78,
+  length = 96,
+  thickness = 6.5,
+  cornerR = 5,
+  bevel = 1.1,
+  partingGap = 2.2,
+  linerThickness = 3.2,
+  boltInset = 9.5,
+  boltRadius = 2.6,
+  latchCount = 2,
+  serialText = '01',
+  serialSub = 'PNL',
+  slots = [],
+  holes = [],
+  shellMat = null,
+  linerMat = null,
+  accentMat = null,
+  boltMat = null,
+} = {}) {
+  const M = createMaterials();
+  const sMat = governIndustrialMaterial(shellMat || M.white, 'shell');
+  const lMat = governIndustrialMaterial(linerMat || M.liner, 'shell');
+  const aMat = accentMat || M.anodizedRed;
+  const bMat = boltMat || M.steel;
+
+  const group = new THREE.Group();
+  const hw = width / 2 - boltInset;
+  const hl = length / 2 - boltInset;
+  const cornerBolts = [
+    [-hw, -hl],
+    [hw, -hl],
+    [-hw, hl],
+    [hw, hl],
+  ];
+  const allHoles = [
+    ...holes,
+    ...cornerBolts.map(([bx, bz]) => ({ x: bx, z: bz, r: boltRadius * 0.95 })),
+  ];
+
+  // 1. Dark recessed chassis liner (sits beneath the outer shell and extends into parting seams)
+  const linerGeo = machinedPlateGeometry({
+    w: Math.max(8, width - partingGap * 2),
+    h: linerThickness,
+    d: Math.max(8, length - partingGap * 2),
+    r: Math.max(2, cornerR - 1),
+    bevel: 0.6,
+    slots,
+  });
+  const linerMesh = new THREE.Mesh(linerGeo, lMat);
+  linerMesh.position.y = -thickness * 0.5 - linerThickness * 0.35;
+  linerMesh.castShadow = true;
+  linerMesh.receiveShadow = true;
+  group.add(linerMesh);
+
+  // 2. Outer bevelled machined shell plate
+  const shellGeo = machinedPlateGeometry({
+    w: width,
+    h: thickness,
+    d: length,
+    r: cornerR,
+    bevel,
+    holes: allHoles,
+    slots,
+  });
+  const shellMesh = new THREE.Mesh(shellGeo, sMat);
+  shellMesh.castShadow = true;
+  shellMesh.receiveShadow = true;
+  group.add(shellMesh);
+
+  // 3. Countersunk corner boss seats + hex fasteners + crevice AO rings
+  const bossGeo = counterboreBossGeometry({
+    rOuter: boltRadius * 1.95,
+    rBore: boltRadius * 0.72,
+    rCounter: boltRadius * 1.35,
+    hTotal: thickness * 0.92,
+    hCounter: thickness * 0.38,
+    bevel: 0.4,
+    seg: 24,
+  });
+  const fastenerGeo = boltGeometry({ r: boltRadius, h: boltRadius * 1.35, washer: true });
+
+  for (const [bx, bz] of cornerBolts) {
+    const boss = new THREE.Mesh(bossGeo, lMat);
+    boss.position.set(bx, 0.2, bz);
+    group.add(boss);
+
+    const bolt = new THREE.Mesh(fastenerGeo, bMat);
+    bolt.position.set(bx, thickness * 0.5 + 0.4, bz);
+    bolt.castShadow = true;
+    group.add(bolt);
+
+    const ao = creviceAoRing({ rIn: boltRadius * 1.4, rOut: boltRadius * 2.5, opacity: 0.44 });
+    ao.position.set(bx, thickness * 0.5 + 0.08, bz);
+    group.add(ao);
+  }
+
+  // 4. Anodized red/orange mechanical latches along the parting seam
+  if (latchCount > 0) {
+    const latchW = Math.min(12, width * 0.16);
+    const latchH = thickness * 0.85;
+    const latchD = 5.4;
+    const latchGeo = blockGeometry({ w: latchW, h: latchH, d: latchD, r: 1.2, bevel: 0.5 });
+    for (let i = 0; i < latchCount; i++) {
+      const side = i % 2 === 0 ? 1 : -1;
+      const zOff = latchCount > 2 ? ((Math.floor(i / 2) - 0.5) * length * 0.42) : 0;
+      const latch = new THREE.Mesh(latchGeo, aMat);
+      latch.position.set(side * (width * 0.5 - latchW * 0.32), 0.35, zOff);
+      latch.castShadow = true;
+      group.add(latch);
+    }
+  }
+
+  // 5. Silkscreen serial number decal flush on the outer face
+  if (serialText) {
+    const decalW = Math.min(width * 0.42, 26);
+    const decalH = decalW * 0.54;
+    const decal = createSilkscreenDecal({
+      text: serialText,
+      subText: serialSub,
+      width: decalW,
+      height: decalH,
+    });
+    decal.rotation.x = -Math.PI / 2;
+    decal.position.set(-width * 0.18, thickness * 0.5 + 0.12, length * 0.22);
+    group.add(decal);
+  }
+
+  return { group, shellMesh, linerMesh };
+}
+
+/**
+ * Compound Braided Hydraulic Hose Bundle (`braidedHoseBundle`).
+ * Generates a high-density routed hydraulic bundle with:
+ *   - Diamond-weave braided rubber hoses (`sweptProfileGeometry` + `M.braidedHose`);
+ *   - Hex brass crimp ferrules & stepped union collars at both ends of every hose;
+ *   - Intermediate anodized retaining clamp blocks with socket fasteners;
+ *   - Live `update(newRoutes)` method for real-time deformation across moving joints.
+ */
+export function braidedHoseBundle({
+  routes = [],
+  hoseRadius = 3.2,
+  ferruleLen = 9.0,
+  clampAt = [0.5],
+  hoseMat = null,
+  brassMat = null,
+  clampMat = null,
+  boltMat = null,
+} = {}) {
+  const M = createMaterials();
+  const hMat = hoseMat || M.braidedHose;
+  const fMat = brassMat || M.brass;
+  const cMat = clampMat || M.anodizedRed;
+  const bMat = boltMat || M.steel;
+
+  const group = new THREE.Group();
+  const hoseEntries = [];
+
+  // Hex crimp ferrule geometry (6-sided hex nut + cylindrical crimp sleeve)
+  const hexNut = new THREE.CylinderGeometry(hoseRadius * 1.58, hoseRadius * 1.58, ferruleLen * 0.46, 6);
+  hexNut.translate(0, ferruleLen * 0.22, 0);
+  const sleeve = new THREE.CylinderGeometry(hoseRadius * 1.32, hoseRadius * 1.38, ferruleLen * 0.54, 18);
+  sleeve.translate(0, -ferruleLen * 0.24, 0);
+  const ferruleGeo = normalizeGeometryUVs(mergeGeometries([hexNut, sleeve]));
+
+  const upVec = new THREE.Vector3(0, 1, 0);
+  const tmpTan = new THREE.Vector3();
+
+  for (let i = 0; i < routes.length; i++) {
+    const pts = routes[i].map((p) => (p.isVector3 ? p.clone() : new THREE.Vector3(p[0], p[1], p[2])));
+    const r = typeof hoseRadius === 'function' ? hoseRadius(i) : hoseRadius;
+    const geo = sweptProfileGeometry({
+      points: pts,
+      radiusAt: r,
+      tubularSeg: 36,
+      radialSeg: 14,
+      capEnds: true,
+    });
+    const mesh = new THREE.Mesh(geo, hMat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+
+    const ferruleStart = new THREE.Mesh(ferruleGeo, fMat);
+    const ferruleEnd = new THREE.Mesh(ferruleGeo, fMat);
+    ferruleStart.castShadow = true;
+    ferruleEnd.castShadow = true;
+    group.add(ferruleStart, ferruleEnd);
+
+    hoseEntries.push({ mesh, geo, r, ferruleStart, ferruleEnd, pts });
+  }
+
+  // Intermediate retaining clamp blocks
+  const clamps = [];
+  if (routes.length >= 2 && clampAt && clampAt.length > 0) {
+    const span = Math.max(12, routes.length * hoseRadius * 2.8);
+    const clampGeo = blockGeometry({
+      w: span + 6,
+      h: hoseRadius * 3.1,
+      d: hoseRadius * 2.8,
+      r: 1.8,
+      bevel: 0.6,
+    });
+    const boltGeo = boltGeometry({ r: hoseRadius * 0.65, h: hoseRadius * 1.1, washer: true });
+    for (const uClamp of clampAt) {
+      const cGroup = new THREE.Group();
+      const cMesh = new THREE.Mesh(clampGeo, cMat);
+      cMesh.castShadow = true;
+      cGroup.add(cMesh);
+      const bL = new THREE.Mesh(boltGeo, bMat);
+      const bR = new THREE.Mesh(boltGeo, bMat);
+      bL.position.set(-span * 0.42, hoseRadius * 1.6, 0);
+      bR.position.set(span * 0.42, hoseRadius * 1.6, 0);
+      cGroup.add(bL, bR);
+      group.add(cGroup);
+      clamps.push({ group: cGroup, u: clamp(uClamp, 0.1, 0.9) });
+    }
+  }
+
+  function poseEndsAndClamps(currentRoutes) {
+    for (let i = 0; i < hoseEntries.length; i++) {
+      const entry = hoseEntries[i];
+      const pts = (currentRoutes[i] || entry.pts).map((p) => (p.isVector3 ? p : new THREE.Vector3(p[0], p[1], p[2])));
+      entry.pts = pts;
+      const curve = new THREE.CatmullRomCurve3(pts);
+
+      const p0 = curve.getPointAt(0.02);
+      curve.getTangentAt(0.02, tmpTan).normalize();
+      entry.ferruleStart.position.copy(p0);
+      entry.ferruleStart.quaternion.setFromUnitVectors(upVec, tmpTan);
+
+      const p1 = curve.getPointAt(0.98);
+      curve.getTangentAt(0.98, tmpTan).normalize();
+      entry.ferruleEnd.position.copy(p1);
+      entry.ferruleEnd.quaternion.setFromUnitVectors(upVec, tmpTan.negate());
+    }
+
+    if (clamps.length > 0 && hoseEntries.length > 0) {
+      for (const cl of clamps) {
+        const center = new THREE.Vector3();
+        for (const entry of hoseEntries) {
+          const curve = new THREE.CatmullRomCurve3(entry.pts);
+          center.add(curve.getPointAt(cl.u));
+        }
+        center.divideScalar(hoseEntries.length);
+        const refCurve = new THREE.CatmullRomCurve3(hoseEntries[0].pts);
+        refCurve.getTangentAt(cl.u, tmpTan).normalize();
+        cl.group.position.copy(center);
+        cl.group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tmpTan);
+      }
+    }
+  }
+
+  poseEndsAndClamps(routes);
+
+  function update(newRoutes = []) {
+    for (let i = 0; i < hoseEntries.length; i++) {
+      if (!newRoutes[i]) continue;
+      updateSweptGeometry(hoseEntries[i].geo, newRoutes[i], hoseEntries[i].r);
+    }
+    poseEndsAndClamps(newRoutes);
+  }
+
+  return { group, hoses: hoseEntries, clamps, update };
+}
+
+/**
+ * Compound Flanged Bulkhead Ring / Rib Arch (`flangedRingBulkhead`).
+ * Replaces raw `TorusGeometry` / `CylinderGeometry` ribs with an engineered I-section bulkhead:
+ *   - Outer and inner raised stiffening flanges + recessed structural web;
+ *   - Circumferential weight-relief lightening bores (`lighteningHoles`);
+ *   - Counterbored bolt bosses + hex fasteners (`boltCount`).
+ */
+export function flangedRingBulkhead({
+  rOuter = 68,
+  rInner = 46,
+  thickness = 10,
+  webThickness = 4.2,
+  flangeRim = 3.8,
+  lighteningHoles = 8,
+  boltCount = 8,
+  bevel = 0.8,
+  mat = null,
+  boltMat = null,
+} = {}) {
+  const M = createMaterials();
+  const ringMat = governIndustrialMaterial(mat || M.alu, 'shell');
+  const bMat = boltMat || M.steel;
+
+  const rMid = (rOuter + rInner) * 0.5;
+  const radialSpan = rOuter - rInner;
+  const holeR = Math.min(radialSpan * 0.24, (rMid * Math.PI) / Math.max(4, lighteningHoles * 2.2));
+
+  const webSh = new THREE.Shape();
+  webSh.absarc(0, 0, rOuter, 0, Math.PI * 2, false);
+  const innerHole = new THREE.Path();
+  innerHole.absarc(0, 0, rInner, 0, Math.PI * 2, true);
+  webSh.holes.push(innerHole);
+  if (lighteningHoles > 0 && holeR > 1.2) {
+    for (let i = 0; i < lighteningHoles; i++) {
+      const a = (i * Math.PI * 2) / lighteningHoles;
+      const p = new THREE.Path();
+      p.absarc(Math.cos(a) * rMid, Math.sin(a) * rMid, holeR, 0, Math.PI * 2, true);
+      webSh.holes.push(p);
+    }
+  }
+
+  const webGeo = new THREE.ExtrudeGeometry(webSh, {
+    depth: webThickness,
+    bevelEnabled: false,
+    curveSegments: 40,
+  });
+  webGeo.translate(0, 0, -webThickness / 2);
+
+  const rimDepth = Math.max(1, thickness - bevel * 2);
+  const makeRingRim = (rO, rI) => {
+    const sh = new THREE.Shape();
+    sh.absarc(0, 0, rO, 0, Math.PI * 2, false);
+    const h = new THREE.Path();
+    h.absarc(0, 0, rI, 0, Math.PI * 2, true);
+    sh.holes.push(h);
+    const g = new THREE.ExtrudeGeometry(sh, {
+      depth: rimDepth,
+      bevelEnabled: true,
+      bevelThickness: bevel,
+      bevelSize: bevel,
+      bevelSegments: 2,
+      curveSegments: 40,
+    });
+    g.translate(0, 0, -rimDepth / 2);
+    return g;
+  };
+  const outerRimGeo = makeRingRim(rOuter, Math.max(rInner + 1, rOuter - flangeRim));
+  const innerRimGeo = makeRingRim(Math.min(rOuter - 1, rInner + flangeRim), rInner);
+
+  const bodyGeo = normalizeGeometryUVs(mergeGeometries([webGeo, outerRimGeo, innerRimGeo]));
+  const group = new THREE.Group();
+  const bodyMesh = new THREE.Mesh(bodyGeo, ringMat);
+  bodyMesh.castShadow = true;
+  bodyMesh.receiveShadow = true;
+  group.add(bodyMesh);
+
+  if (boltCount > 0) {
+    const bGeo = boltGeometry({ r: Math.min(2.6, flangeRim * 0.65), h: 3.6, washer: true });
+    bGeo.rotateX(Math.PI / 2);
+    for (let i = 0; i < boltCount; i++) {
+      const a = ((i + 0.5) * Math.PI * 2) / boltCount;
+      const bx = Math.cos(a) * rMid;
+      const by = Math.sin(a) * rMid;
+      for (const sz of [-1, 1]) {
+        const bolt = new THREE.Mesh(bGeo, bMat);
+        bolt.position.set(bx, by, sz * (thickness * 0.5 + 0.6));
+        if (sz < 0) bolt.rotation.y = Math.PI;
+        group.add(bolt);
+      }
+    }
+  }
+
+  return { group, bodyMesh, geometry: bodyGeo };
+}
+
+// ============================================================================
 // 4. TRUE STENCIL SECTION-CUT MANAGER (AUTOMATIC CROSS-HATCH CAPS)
 // ============================================================================
 
@@ -1446,6 +2017,327 @@ export function poseCompressedSpring(springObj, restLen, currentLen) {
  */
 export function layerEase(ex, [from, to], distance) {
   return smootherstep(from, to, clamp(ex, 0, 1)) * distance;
+}
+
+// ============================================================================
+// 5B. HIERARCHICAL KINEMATIC RIGGING & STATE-MACHINE SUBSYSTEM TEARDOWN
+// ============================================================================
+
+/**
+ * Hierarchical Ball-and-Socket Articulated Chain (`createArticulatedChain`).
+ * Enforces true parent-child skeletal nesting (`joint_0 -> seg_0 -> joint_1 -> ...`) with hard
+ * angular cone limits (`maxConeAngle`) and local-axis teardown separation (`explodeStep`),
+ * eliminating the world-space sine-wave interpenetration bug (`Pelagos OC-8` arm standard).
+ */
+export function createArticulatedChain({
+  count = 6,
+  segLength = 26,
+  radiusAt = (i) => 16 - i * 1.4,
+  maxConeAngle = 0.42,
+  serialPrefix = '',
+  shellMat = null,
+  jointMat = null,
+  linerMat = null,
+  accentMat = null,
+} = {}) {
+  const M = createMaterials();
+  const sMat = governIndustrialMaterial(shellMat || M.white, 'shell');
+  const jMat = governIndustrialMaterial(jointMat || M.titanium, 'shell');
+  const lMat = governIndustrialMaterial(linerMat || M.liner, 'shell');
+  const aMat = accentMat || M.anodizedRed;
+
+  const root = new THREE.Group();
+  const segments = [];
+  let parentNode = root;
+
+  for (let i = 0; i < count; i++) {
+    const len = typeof segLength === 'function' ? segLength(i) : Array.isArray(segLength) ? segLength[i] : segLength;
+    const r = typeof radiusAt === 'function' ? radiusAt(i) : radiusAt;
+    const rNext = typeof radiusAt === 'function' ? radiusAt(i + 1) : r * 0.88;
+
+    const jointPivot = new THREE.Group();
+    if (i > 0) {
+      const prevLen = typeof segLength === 'function' ? segLength(i - 1) : Array.isArray(segLength) ? segLength[i - 1] : segLength;
+      jointPivot.position.y = prevLen;
+    }
+    parentNode.add(jointPivot);
+
+    // Spherical ball-and-socket collar at the base of the segment
+    const rBall = Math.max(3.5, r * 0.48);
+    const { ballGeo, socketGeo } = ballJointGeometry({
+      rBall,
+      rSocket: rBall * 1.24,
+      neckR: rBall * 0.48,
+      neckLen: len * 0.28,
+      seg: 24,
+    });
+    const ballMesh = new THREE.Mesh(ballGeo, M.chrome);
+    ballMesh.castShadow = true;
+    parentNode.add(ballMesh);
+    if (i > 0) {
+      const prevLen = typeof segLength === 'function' ? segLength(i - 1) : Array.isArray(segLength) ? segLength[i - 1] : segLength;
+      ballMesh.position.y = prevLen;
+    }
+
+    const segBody = new THREE.Group();
+    jointPivot.add(segBody);
+
+    const socketMesh = new THREE.Mesh(socketGeo, jMat);
+    socketMesh.castShadow = true;
+    segBody.add(socketMesh);
+
+    // Tapered machined outer collar + dark inner liner sleeve + anodized retention ring
+    const collarLen = Math.max(4, len * 0.68);
+    const linerGeo = normalizeGeometryUVs(new THREE.CylinderGeometry(rNext * 0.82, r * 0.82, collarLen * 0.94, 24));
+    const linerMesh = new THREE.Mesh(linerGeo, lMat);
+    linerMesh.position.y = len * 0.52;
+    segBody.add(linerMesh);
+
+    const outerGeo = flangedRingBulkhead({
+      rOuter: r,
+      rInner: r * 0.66,
+      thickness: collarLen * 0.56,
+      webThickness: collarLen * 0.24,
+      flangeRim: Math.max(1.8, r * 0.14),
+      lighteningHoles: 6,
+      boltCount: 6,
+      mat: sMat,
+      boltMat: M.steel,
+    }).geometry;
+    outerGeo.rotateX(Math.PI / 2);
+    const outerMesh = new THREE.Mesh(outerGeo, sMat);
+    outerMesh.position.y = len * 0.52;
+    outerMesh.castShadow = true;
+    outerMesh.receiveShadow = true;
+    segBody.add(outerMesh);
+
+    if (i % 2 === 0) {
+      const latchGeo = blockGeometry({ w: Math.max(2.5, r * 0.24), h: collarLen * 0.42, d: 3.2, r: 0.8, bevel: 0.3 });
+      const latch = new THREE.Mesh(latchGeo, aMat);
+      latch.position.set(r * 0.96, len * 0.52, 0);
+      segBody.add(latch);
+    }
+
+    if (serialPrefix && i < 8) {
+      const decal = createSilkscreenDecal({
+        text: `${serialPrefix}${String(i + 1).padStart(2, '0')}`,
+        subText: 'JNT',
+        width: Math.max(6, r * 0.72),
+        height: Math.max(3.5, r * 0.40),
+      });
+      decal.position.set(0, len * 0.52, r + 0.3);
+      segBody.add(decal);
+    }
+
+    segments.push({ index: i, jointPivot, segBody, len, r });
+    parentNode = segBody;
+  }
+
+  function pose({
+    angles = null,
+    t = 0,
+    freq = 2.0,
+    waveNumber = 1.8,
+    ampPitch = 0.18,
+    ampYaw = 0.22,
+    curl = 0.0,
+    explode = 0.0,
+    explodeStep = 14,
+  } = {}) {
+    const ex = clamp(explode, 0, 1);
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      const u = i / Math.max(1, segments.length - 1);
+      let yaw = 0;
+      let pitch = 0;
+      let roll = 0;
+      if (Array.isArray(angles) && angles[i]) {
+        yaw = angles[i][0] || 0;
+        pitch = angles[i][1] || 0;
+        roll = angles[i][2] || 0;
+      } else {
+        const env = 0.35 + 0.65 * u;
+        const ph = t * freq - u * waveNumber * Math.PI * 2;
+        yaw = Math.sin(ph) * ampYaw * env;
+        pitch = Math.cos(ph * 0.85 + 0.5) * ampPitch * env + curl / segments.length;
+      }
+      // Enforce hard mechanical cone limits so adjacent collars never interpenetrate
+      seg.jointPivot.rotation.set(
+        clamp(pitch, -maxConeAngle, maxConeAngle),
+        clamp(roll, -maxConeAngle * 0.5, maxConeAngle * 0.5),
+        clamp(yaw, -maxConeAngle, maxConeAngle),
+      );
+      // Axial teardown separation along local segment rail (`ARM APART` mode)
+      seg.segBody.position.set(0, ex * explodeStep * (1 + i * 0.15), 0);
+    }
+  }
+
+  pose({ t: 0, explode: 0 });
+  return { root, segments, pose };
+}
+
+/**
+ * State-Machine Subsystem Rig & Ghost Solo Isolator (`createSubsystemRig`).
+ * Implements `teardown`'s two core mechanical choreography rules:
+ *   1. Collision-free local-rail / local-hinge subsystem opening (`MANTLE OPEN`, `OPTICS OPEN`, `ARM APART`);
+ *   2. Subsystem `solo` isolation (`fade` smoothly transitions non-soloed subsystems to translucent ghost meshes).
+ */
+export function createSubsystemRig({ ghostOpacity = 0.16 } = {}) {
+  const subsystems = new Map();
+  const rotQuat = new THREE.Quaternion();
+  const rotAxisVec = new THREE.Vector3();
+
+  function register(
+    id,
+    object3d,
+    {
+      explodeVec = [0, 0, 0],
+      rotAxis = [1, 0, 0],
+      rotAngle = 0,
+      window = [0, 1],
+    } = {},
+  ) {
+    if (!object3d) return null;
+    const basePos = object3d.position.clone();
+    const baseQuat = object3d.quaternion.clone();
+    const meshMaterials = [];
+
+    object3d.traverse((m) => {
+      if (!m.isMesh || m.userData?.isStencilHelper || m.userData?.isSectionCap || m.userData?.isHudOverlay) return;
+      if (!m.material || Array.isArray(m.material)) return;
+      const origMat = m.material;
+      const ghostMat = origMat.clone();
+      ghostMat.transparent = true;
+      ghostMat.depthWrite = false;
+      ghostMat.opacity = ghostOpacity;
+      meshMaterials.push({ mesh: m, origMat, ghostMat });
+    });
+
+    const entry = {
+      id,
+      object3d,
+      basePos,
+      baseQuat,
+      explodeVec: new THREE.Vector3(...explodeVec),
+      rotAxis: new THREE.Vector3(...rotAxis).normalize(),
+      rotAngle,
+      window,
+      meshMaterials,
+      currentWeight: 0,
+    };
+    subsystems.set(id, entry);
+    return entry;
+  }
+
+  function update({ states = {}, explode = 0, solo = null, soloFade = 0 } = {}) {
+    const globalEx = clamp(explode, 0, 1);
+    const fade = clamp(soloFade, 0, 1);
+
+    for (const [id, sub] of subsystems.entries()) {
+      const stateW = states[id] !== undefined ? clamp(states[id], 0, 1) : 0;
+      const globalW = globalEx > 0 ? smootherstep(sub.window[0], sub.window[1], globalEx) : 0;
+      const w = clamp(Math.max(stateW, globalW), 0, 1);
+      sub.currentWeight = w;
+
+      // Rigid-body translation along local rail vector
+      sub.object3d.position.copy(sub.basePos).addScaledVector(sub.explodeVec, w);
+
+      // Optional hinge rotation around local axis
+      if (Math.abs(sub.rotAngle) > 1e-4) {
+        rotAxisVec.copy(sub.rotAxis);
+        rotQuat.setFromAxisAngle(rotAxisVec, sub.rotAngle * w);
+        sub.object3d.quaternion.copy(sub.baseQuat).multiply(rotQuat);
+      } else {
+        sub.object3d.quaternion.copy(sub.baseQuat);
+      }
+
+      // Solo isolation ghosting (`teardown` `engine.js` lines 588-619)
+      const isGhost = Boolean(solo && solo !== id && fade > 0.02);
+      for (const mm of sub.meshMaterials) {
+        if (isGhost) {
+          mm.ghostMat.opacity = lerp(1.0, ghostOpacity, fade);
+          mm.mesh.material = mm.ghostMat;
+        } else {
+          mm.mesh.material = mm.origMat;
+        }
+      }
+    }
+  }
+
+  return { subsystems, register, update };
+}
+
+/**
+ * State-Machine Teardown Script Controller (`createTeardownController`).
+ * Drives named subsystem states (`OPTICS OPEN` -> `MANTLE OPEN` -> `ARM APART` -> `TEARDOWN`),
+ * solo isolation fades, 3D leader callouts, and an automated operator cursor with click ripples
+ * synchronized with `createGaugeHud`.
+ */
+export function createTeardownController({ stages = [], subRig = null } = {}) {
+  const pillLabels = stages.map((s) => s.label || s.id || 'STAGE');
+
+  function evaluate({ sceneIndex = 0, localT = 0, sceneDur = 3.5 } = {}) {
+    const idx = clamp(sceneIndex, 0, Math.max(0, stages.length - 1));
+    const cur = stages[idx] || {};
+    const prev = idx > 0 ? stages[idx - 1] : cur;
+
+    const transDur = cur.transitionDur ?? 1.1;
+    const u = smootherstep(0.08, Math.max(0.25, transDur), localT);
+
+    // Blend per-subsystem weights between previous stage and current stage
+    const allKeys = new Set([
+      ...Object.keys(prev.states || {}),
+      ...Object.keys(cur.states || {}),
+    ]);
+    const states = {};
+    for (const k of allKeys) {
+      states[k] = lerp(prev.states?.[k] ?? 0, cur.states?.[k] ?? 0, u);
+    }
+
+    const explode = lerp(prev.explode ?? 0, cur.explode ?? 0, u);
+    const solo = cur.solo || null;
+    const soloFade = solo ? smootherstep(0.15, 0.85, localT) : 0;
+
+    if (subRig) {
+      subRig.update({ states, explode, solo, soloFade });
+    }
+
+    // Operator cursor choreography: glides from previous pill to current pill & clicks at t ≈ 0.28s
+    const moveK = smootherstep(0.0, 0.28, localT);
+    const clickTime = localT - 0.26;
+    const press = clickTime >= 0 && clickTime < 0.22 ? Math.sin((clickTime / 0.22) * Math.PI) : 0;
+    const ring = clickTime >= 0 && clickTime < 0.58 ? clamp(clickTime / 0.58, 0, 1) : 0;
+    const cursorFadeOut = 1 - smootherstep(1.45, Math.min(sceneDur - 0.1, 2.2), localT);
+
+    const cursor = {
+      fromIndex: idx > 0 ? idx - 1 : idx,
+      toIndex: idx,
+      moveK,
+      press,
+      ring,
+      opacity: clamp(cursorFadeOut, 0, 1),
+    };
+
+    const calloutAlpha = smootherstep(0.25, 0.75, localT) * (1 - smootherstep(sceneDur - 0.45, sceneDur, localT));
+    const callouts = (cur.callouts || []).map((c) => ({
+      ...c,
+      opacity: (c.opacity ?? 1) * calloutAlpha,
+    }));
+
+    return {
+      stage: cur,
+      stageIndex: idx,
+      pillLabels,
+      states,
+      explode,
+      solo,
+      soloFade,
+      cursor,
+      callouts,
+    };
+  }
+
+  return { stages, pillLabels, evaluate };
 }
 
 // ============================================================================
@@ -1809,13 +2701,21 @@ function createBenchTexture() {
   return tex;
 }
 
+/**
+ * `style.ref` = the product's parsed ref.json (injected by gallery/player.html next to a `?world=` file). When it declares a
+ * palette, `lookFromRefPalette` sits between the style defaults and `style.look` (product overrides still win) and
+ * `createMaterials()` tints the shell / mechanism / accent / warm-metal families. No palette -> nothing derived.
+ * Returns `refPalette` (normalised, or null) for worlds that build their own materials.
+ */
 export function createCalLabStudio({ width, height, scenes = [], style = {}, maxDist = null }) {
+  ACTIVE_REF_PALETTE = normalizeRefPalette(style.ref);
+  const refLook = lookFromRefPalette(style.ref);
   const studio = createStudio3D(THREE, {
     width,
     height,
     baseFov: 28,
     scenes,
-    look: resolveLook(LOOK_DEFAULTS, CAL_LOOK, style.look),
+    look: resolveLook(LOOK_DEFAULTS, CAL_LOOK, refLook, style.look),
     presets: resolveLook(LOOK_PRESETS, CAL_LOOK_PRESETS, style.looks),
     maxDist,
   });
@@ -1830,7 +2730,13 @@ export function createCalLabStudio({ width, height, scenes = [], style = {}, max
   bench.receiveShadow = true;
   studio.scene.add(bench);
 
-  return { ...studio, bench, benchTex };
+  // Role studio: the world builds its materials AFTER the studio exists, so the roles it used are read at render time.
+  const baseRender = studio.render;
+  function render(frame) {
+    if (ROLES_USED.glaze || ROLES_USED.metal) studio.lookRig.setRoleDemand(ROLES_USED);
+    baseRender(frame);
+  }
+  return { ...studio, render, bench, benchTex, refPalette: ACTIVE_REF_PALETTE, rolesUsed: ROLES_USED };
 }
 
 const MONO = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
@@ -1939,12 +2845,14 @@ export function createGaugeHud({ camera, width, height }) {
     ctx.fillText(big.unit || '', m + bw + Math.round(9 * u), bigY + Math.round(54 * u));
 
     const phase = state.phase;
+    let stripLayout = null;
     if (phase && phase.labels) {
-      const cellW = Math.round(portrait ? (W - m * 2) / 4 : 104 * u);
+      const cellW = Math.round(portrait ? (W - m * 2) / phase.labels.length : 138 * u);
       const cellH = Math.round(28 * u);
       const py = H - m - cellH - Math.round(16 * u);
       const stripW = cellW * phase.labels.length;
-      ctx.fillStyle = 'rgba(250, 251, 252, 0.88)';
+      stripLayout = { x0: m, py, cellW, cellH, count: phase.labels.length };
+      ctx.fillStyle = 'rgba(250, 251, 252, 0.90)';
       ctx.fillRect(m - 6 * u, py - 6 * u, stripW + 12 * u, cellH + 12 * u);
       ctx.strokeStyle = CAL_PALETTE.line;
       ctx.lineWidth = 1;
@@ -1955,14 +2863,121 @@ export function createGaugeHud({ camera, width, height }) {
         ctx.fillStyle = on ? accent : 'rgba(21, 24, 28, 0.04)';
         ctx.fillRect(x + 1, py, cellW - 3, cellH);
         ctx.fillStyle = on ? '#FFFFFF' : '#5E666F';
-        ctx.font = `600 ${Math.round(12 * u)}px ${MONO}`;
+        ctx.font = `600 ${Math.round(11.5 * u)}px ${MONO}`;
         ctx.textAlign = 'center';
         ctx.fillText(label, x + cellW / 2, py + cellH * 0.68);
         ctx.textAlign = 'left';
       });
       ctx.fillStyle = CAL_PALETTE.muted;
       ctx.font = `500 ${Math.round(12 * u)}px ${MONO}`;
-      spacedText(ctx, 'CYCLE 0–720° · 1 DOF DERIVED', m, py - Math.round(8 * u), 1.2 * u);
+      spacedText(ctx, phase.caption || 'CYCLE 0–720° · 1 DOF DERIVED', m, py - Math.round(8 * u), 1.2 * u);
+    }
+
+    // 3D-to-2D Projected Collision-Free Stacked Leader Callouts (`teardown` `film.js` standard)
+    const callouts = state.callouts;
+    if (Array.isArray(callouts) && callouts.length > 0) {
+      camera.updateMatrixWorld();
+      const projVec = new THREE.Vector3();
+      const leftCol = [];
+      const rightCol = [];
+
+      for (const item of callouts) {
+        const alpha = clamp(item.opacity ?? 1, 0, 1);
+        if (alpha <= 0.02) continue;
+        if (item.target && item.target.isObject3D) {
+          item.target.getWorldPosition(projVec);
+          if (item.offset) {
+            projVec.x += item.offset[0] || 0;
+            projVec.y += item.offset[1] || 0;
+            projVec.z += item.offset[2] || 0;
+          }
+        } else if (Array.isArray(item.worldPos)) {
+          projVec.set(item.worldPos[0], item.worldPos[1], item.worldPos[2]);
+        } else if (item.worldPos?.isVector3) {
+          projVec.copy(item.worldPos);
+        } else {
+          continue;
+        }
+        projVec.project(camera);
+        if (projVec.z > 1.0 || projVec.z < -1.0) continue;
+        const sx = (projVec.x * 0.5 + 0.5) * W;
+        const sy = (-projVec.y * 0.5 + 0.5) * H;
+        const side = item.side || (sx < W * 0.5 ? 'left' : 'right');
+        const entry = {
+          label: String(item.label || '').toUpperCase(),
+          sub: String(item.sub || '').toUpperCase(),
+          sx,
+          sy,
+          ly: clamp(sy, m + 180 * u, H - m - 96 * u),
+          alpha,
+          accent: Boolean(item.accent),
+        };
+        if (side === 'left') leftCol.push(entry);
+        else rightCol.push(entry);
+      }
+
+      const minGap = Math.round(52 * u);
+      const stackColumn = (col) => {
+        col.sort((a, b) => a.ly - b.ly);
+        for (let i = 1; i < col.length; i++) {
+          if (col[i].ly - col[i - 1].ly < minGap) {
+            col[i].ly = col[i - 1].ly + minGap;
+          }
+        }
+      };
+      stackColumn(leftCol);
+      stackColumn(rightCol);
+
+      const drawColumn = (col, isLeft) => {
+        const cardW = Math.round((portrait ? 176 : 210) * u);
+        const cardH = Math.round(42 * u);
+        const cardX = isLeft ? m : W - m - cardW;
+        const anchorEdgeX = isLeft ? cardX + cardW : cardX;
+        const elbowDx = isLeft ? Math.round(18 * u) : -Math.round(18 * u);
+
+        for (const c of col) {
+          ctx.save();
+          ctx.globalAlpha = c.alpha;
+          const strokeCol = c.accent ? accent : 'rgba(21, 24, 28, 0.72)';
+
+          // Anchor target ring on 3D part
+          ctx.strokeStyle = strokeCol;
+          ctx.lineWidth = Math.max(1.2, 1.6 * u);
+          ctx.beginPath();
+          ctx.arc(c.sx, c.sy, Math.max(3.5, 4.5 * u), 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = c.accent ? accent : CAL_PALETTE.ink;
+          ctx.beginPath();
+          ctx.arc(c.sx, c.sy, Math.max(1.6, 2.0 * u), 0, Math.PI * 2);
+          ctx.fill();
+
+          // Crisp technical elbow leader line
+          ctx.beginPath();
+          ctx.moveTo(c.sx, c.sy);
+          ctx.lineTo(anchorEdgeX + elbowDx, c.ly);
+          ctx.lineTo(anchorEdgeX, c.ly);
+          ctx.stroke();
+
+          // Callout card
+          const cy = Math.round(c.ly - cardH * 0.5);
+          panel(cardX, cy, cardW, cardH, { alpha: 0.92 });
+          ctx.fillStyle = c.accent ? accent : CAL_PALETTE.ink;
+          ctx.fillRect(isLeft ? cardX : cardX + cardW - Math.max(3, Math.round(3.5 * u)), cy, Math.max(3, Math.round(3.5 * u)), cardH);
+
+          ctx.fillStyle = CAL_PALETTE.ink;
+          ctx.font = `700 ${Math.round(12.5 * u)}px ${MONO}`;
+          ctx.fillText(c.label, cardX + Math.round(10 * u), cy + Math.round(17 * u));
+          if (c.sub) {
+            ctx.fillStyle = CAL_PALETTE.muted;
+            ctx.font = `500 ${Math.round(10.5 * u)}px ${MONO}`;
+            ctx.fillText(c.sub, cardX + Math.round(10 * u), cy + Math.round(33 * u));
+          }
+          ctx.restore();
+        }
+      };
+
+      drawColumn(leftCol, true);
+      drawColumn(rightCol, false);
     }
 
     const plot = state.plot;
@@ -2027,8 +3042,583 @@ export function createGaugeHud({ camera, width, height }) {
       }
     }
 
+    // Animated Operator Pointer & Click Ripple Ring (`teardown` `makeCursor` standard)
+    const cur = state.cursor;
+    if (cur && (cur.opacity ?? 1) > 0.02 && stripLayout) {
+      const fromX = stripLayout.x0 + (cur.fromIndex ?? 0) * stripLayout.cellW + stripLayout.cellW * 0.52;
+      const toX = stripLayout.x0 + (cur.toIndex ?? 0) * stripLayout.cellW + stripLayout.cellW * 0.52;
+      const cx = cur.x ?? lerp(fromX, toX, clamp(cur.moveK ?? 1, 0, 1));
+      const cy = cur.y ?? (stripLayout.py + stripLayout.cellH * 0.58);
+
+      ctx.save();
+      ctx.globalAlpha = clamp(cur.opacity ?? 1, 0, 1);
+
+      if ((cur.ring ?? 0) > 0.01) {
+        const rk = clamp(cur.ring, 0, 1);
+        ctx.strokeStyle = accent;
+        ctx.globalAlpha = clamp(cur.opacity ?? 1, 0, 1) * (1 - rk) * 0.85;
+        ctx.lineWidth = Math.max(1.5, 2.2 * u);
+        ctx.beginPath();
+        ctx.arc(toX, cy, (6 + rk * 22) * u, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = clamp(cur.opacity ?? 1, 0, 1);
+      }
+
+      const scale = (1 - (cur.press ?? 0) * 0.16) * Math.max(0.75, u);
+      ctx.translate(cx, cy);
+      ctx.scale(scale, scale);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, 20);
+      ctx.lineTo(5.5, 15.5);
+      ctx.lineTo(9.5, 23.5);
+      ctx.lineTo(12.5, 22);
+      ctx.lineTo(8.5, 14);
+      ctx.lineTo(15, 14);
+      ctx.closePath();
+      ctx.fillStyle = '#15181C';
+      ctx.fill();
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ctx.restore();
+    }
+
     tex.needsUpdate = true;
   }
 
   return { plane, canvas, texture: tex, draw, fit };
+}
+
+// ============================================================================
+// 8. MACHINE-FEEL PRIMITIVES + MATERIAL ROLES (ADR-021, teardown absorption)
+// ============================================================================
+//
+// Method borrowed from the `teardown` skill (MIT, elvarofficial; see CREDITS.md): seams carry sunk liners and
+// pitch-exact clasps, rings stack and counter-rotate, fins repeat at an exact pitch, sleeves follow a curve,
+// wear is painted into the COLOUR map, detail arrives with camera distance, metals are metals. Reimplemented here
+// for this engine; nothing of the teardown models, palettes or shot lists is carried over.
+//
+// Admission rules (ADR-021): (1) no species / object words in any name; (2) NO good-looking defaults - every
+// distribution parameter must be passed explicitly and a missing one throws (read it off your reference);
+// (3) shape and material role only, never colour; (4) each primitive is shown on two different subjects (SPEC §8).
+
+function need(fn, o, keys) {
+  if (!o || typeof o !== 'object') throw new Error(`${fn}: options object required`);
+  for (const k of keys) {
+    if (o[k] === undefined) throw new Error(`${fn}: missing required parameter "${k}" (no default by design: take it from your reference reading)`);
+  }
+  return o;
+}
+
+// ---------------------------------------------------------------- material roles
+
+/**
+ * Roles decide treatment, not species (GEMINI.md rule 6). `shell`/`structural`/`precision` keep their matte rules
+ * above; the roles below are added by ADR-021. `glaze` is EXEMPT from the matte-shell rule
+ * (roughness >= 0.45, clearcoat <= 0.14): it is a separate role with a glossy clearcoat so a softbox draws a
+ * sharp highlight on the panel. Use it only where the reference shows lacquered / enamelled / ceramic plates.
+ */
+export const MATERIAL_ROLES = {
+  metal: { metalnessMin: 0.8, roughnessMin: 0.12, envMapScale: 1.0 },
+  glaze: { metalnessMax: 0.2, roughnessMax: 0.16, clearcoatMin: 0.6, clearcoatRoughnessMax: 0.12, envMapScale: 1.0 },
+  liner: { metalnessMax: 0.4, roughnessMin: 0.6, envMapScale: 0.4 },
+  emissive: { emissive: true },
+};
+
+/** Roles the running world has used so far; `createCalLabStudio().render` hands them to the look rig (role studio). */
+const ROLES_USED = { glaze: false, metal: false };
+
+export function governMaterialRole(mat, role) {
+  const r = MATERIAL_ROLES[role];
+  if (!r) throw new Error(`governMaterialRole: unknown role "${role}"`);
+  mat.userData = mat.userData || {};
+  mat.userData.role = role;
+  if (role === 'glaze' || role === 'metal') ROLES_USED[role] = true;
+  if (role === 'glaze' && !mat.isMeshPhysicalMaterial) {
+    throw new Error('governMaterialRole: glaze needs a MeshPhysicalMaterial (clearcoat)');
+  }
+  if (r.metalnessMin !== undefined) mat.metalness = Math.max(r.metalnessMin, mat.metalness ?? 0);
+  if (r.metalnessMax !== undefined) mat.metalness = Math.min(r.metalnessMax, mat.metalness ?? 0);
+  if (r.roughnessMin !== undefined) mat.roughness = Math.max(r.roughnessMin, mat.roughness ?? 1);
+  if (r.roughnessMax !== undefined) mat.roughness = Math.min(r.roughnessMax, mat.roughness ?? 0);
+  if (r.clearcoatMin !== undefined) mat.clearcoat = Math.max(r.clearcoatMin, mat.clearcoat ?? 0);
+  if (r.clearcoatRoughnessMax !== undefined) mat.clearcoatRoughness = Math.min(r.clearcoatRoughnessMax, mat.clearcoatRoughness ?? 0);
+  if (r.envMapScale !== undefined) mat.userData.envMapScale = mat.userData.envMapScale ?? r.envMapScale;
+  return mat;
+}
+
+/** Triangle-weighted metalness bands of everything visible under `root` (+ per-role counts). Prints with `log`. */
+export function metalReport(root, { log = true } = {}) {
+  const bands = { metal: 0, mid: 0, dielectric: 0 };
+  const roles = {};
+  const emissiveVisible = new Set();
+  root.updateMatrixWorld(true);
+  root.traverse((o) => {
+    if (!o.isMesh || !o.visible || !o.material) return;
+    const g = o.geometry;
+    const tris = ((g.index ? g.index.count : g.attributes.position.count) / 3) * (o.isInstancedMesh ? o.count : 1);
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (m.userData?.role === 'emissive') emissiveVisible.add(m);
+      if (m.metalness === undefined || m.transparent) continue;
+      const band = m.metalness >= 0.8 ? 'metal' : m.metalness >= 0.4 ? 'mid' : 'dielectric';
+      bands[band] += tris;
+      const role = m.userData?.role || 'unassigned';
+      roles[role] = (roles[role] || 0) + tris;
+    }
+  });
+  const total = bands.metal + bands.mid + bands.dielectric || 1;
+  const pct = (v) => Math.round((v / total) * 100);
+  const res = { metal: pct(bands.metal), mid: pct(bands.mid), dielectric: pct(bands.dielectric), roles, emissiveSubjects: emissiveVisible.size };
+  if (log) console.log(`metalReport: metal>=0.8 ${res.metal}%  mid ${res.mid}%  dielectric ${res.dielectric}%  emissive subjects ${res.emissiveSubjects}`);
+  return res;
+}
+
+// ---------------------------------------------------------------- distance LOD
+
+/** k = 1 at distance <= near, 0 at >= far, smoothstep in between (nothing pops). */
+export function lodAt(distance, near, far) {
+  return smootherstep(0, 1, (far - distance) / Math.max(1e-6, far - near));
+}
+
+/**
+ * Detail by camera distance: far read stays quiet, close-ups grow their small parts. Register setters with
+ * `add(fn)`; call `update(cameraDistance)` once per frame before render. Both `near` and `far` are required.
+ */
+export function createLod(opts) {
+  const { near, far } = need('createLod', opts, ['near', 'far']);
+  const setters = [];
+  let k = -1;
+  return {
+    add(fn) { setters.push(fn); if (k >= 0) fn(k); },
+    update(distance) {
+      const nk = lodAt(distance, near, far);
+      if (nk === k) return k;
+      k = nk;
+      for (const fn of setters) fn(k);
+      return k;
+    },
+    get k() { return k; },
+  };
+}
+
+/** Meshes grow from nothing about their own origin; hidden at k = 0. */
+export function lodScaleIn(meshes, opts) {
+  const { from, to } = need('lodScaleIn', opts, ['from', 'to']);
+  return (k) => {
+    const s = from + (to - from) * k;
+    for (const m of meshes) { m.scale.setScalar(Math.max(s, 1e-4)); m.visible = k > 0.002; }
+  };
+}
+
+/** A material that moves between two looks, `{color:[far,near], metalness:[..], roughness:[..]}` (any subset). */
+export function lodLerpMaterial(mat, spec, objects = []) {
+  if (!spec || (!spec.color && !spec.metalness && !spec.roughness)) throw new Error('lodLerpMaterial: give at least one of color / metalness / roughness as [far, near]');
+  const c0 = spec.color && new THREE.Color(spec.color[0]);
+  const c1 = spec.color && new THREE.Color(spec.color[1]);
+  return (k) => {
+    if (spec.color) mat.color.lerpColors(c0, c1, k);
+    if (spec.metalness) mat.metalness = lerp(spec.metalness[0], spec.metalness[1], k);
+    if (spec.roughness) mat.roughness = lerp(spec.roughness[0], spec.roughness[1], k);
+    for (const o of objects) o.visible = k > 0.002;
+  };
+}
+
+// ---------------------------------------------------------------- window cut + rim
+
+/**
+ * Cut a window out of any mesh. `keep(x,y,z)` is signed: surface stays where >= 0. Straddling triangles are
+ * clipped exactly (position / normal / uv interpolated) so the edge is as clean as the function. Returns
+ * `{ geometry, edges }`, edges being boundary polylines `{points, normals}[]` for `windowRim`.
+ * Hold the outline: keep a band at the outer rim in `keep` so the silhouette does not change.
+ */
+export function cutWindow(geometry, keep) {
+  if (typeof keep !== 'function') throw new Error('cutWindow: keep(x,y,z) signed function required');
+  const src = geometry.index ? geometry.toNonIndexed() : geometry;
+  if (!src.attributes.normal) src.computeVertexNormals();
+  const P = src.attributes.position, N = src.attributes.normal, U = src.attributes.uv;
+  const outP = [], outN = [], outU = [], segs = [];
+  const V = (i) => ({ p: new THREE.Vector3(P.getX(i), P.getY(i), P.getZ(i)), n: new THREE.Vector3(N.getX(i), N.getY(i), N.getZ(i)), u: U ? [U.getX(i), U.getY(i)] : null });
+  const cross = (a, b, fa, fb) => {
+    // interpolate from the lexically smaller end so neighbouring triangles agree on the point
+    if (a.p.x > b.p.x || (a.p.x === b.p.x && (a.p.y > b.p.y || (a.p.y === b.p.y && a.p.z > b.p.z)))) [a, b, fa, fb] = [b, a, fb, fa];
+    const t = fa / (fa - fb);
+    return { p: a.p.clone().lerp(b.p, t), n: a.n.clone().lerp(b.n, t).normalize(), u: a.u ? [a.u[0] + (b.u[0] - a.u[0]) * t, a.u[1] + (b.u[1] - a.u[1]) * t] : null };
+  };
+  const emit = (v) => { outP.push(v.p.x, v.p.y, v.p.z); outN.push(v.n.x, v.n.y, v.n.z); if (v.u) outU.push(v.u[0], v.u[1]); };
+  for (let i = 0; i < P.count; i += 3) {
+    const vs = [V(i), V(i + 1), V(i + 2)];
+    const f = vs.map((v) => keep(v.p.x, v.p.y, v.p.z));
+    if (f[0] >= 0 && f[1] >= 0 && f[2] >= 0) { vs.forEach(emit); continue; }
+    if (f[0] < 0 && f[1] < 0 && f[2] < 0) continue;
+    const poly = [], cut = [];
+    for (let k = 0; k < 3; k++) {
+      const a = vs[k], b = vs[(k + 1) % 3], fa = f[k], fb = f[(k + 1) % 3];
+      if (fa >= 0) poly.push(a);
+      if ((fa >= 0) !== (fb >= 0)) { const x = cross(a, b, fa, fb); poly.push(x); cut.push(x); }
+    }
+    for (let k = 1; k + 1 < poly.length; k++) [poly[0], poly[k], poly[k + 1]].forEach(emit);
+    if (cut.length === 2) segs.push(cut);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(outP, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(outN, 3));
+  if (U) g.setAttribute('uv', new THREE.Float32BufferAttribute(outU, 2));
+  return { geometry: g, edges: chainCutSegments(segs) };
+}
+
+function chainCutSegments(segs) {
+  const key = (v) => `${Math.round(v.p.x * 1e4)},${Math.round(v.p.y * 1e4)},${Math.round(v.p.z * 1e4)}`;
+  const at = new Map();
+  segs.forEach((s, i) => { for (const e of [0, 1]) { const k = key(s[e]); if (!at.has(k)) at.set(k, []); at.get(k).push([i, e]); } });
+  const used = new Uint8Array(segs.length);
+  const walk = (line, i, e) => {
+    for (;;) {
+      const next = (at.get(key(segs[i][e])) || []).find(([j]) => !used[j]);
+      if (!next) return;
+      const [j, ej] = next;
+      used[j] = 1;
+      line.push(segs[j][1 - ej]);
+      i = j; e = 1 - ej;
+    }
+  };
+  const lines = [];
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue;
+    used[i] = 1;
+    const fwd = [segs[i][0], segs[i][1]]; walk(fwd, i, 1);
+    const back = []; walk(back, i, 0);
+    const pts = [...back.reverse(), ...fwd];
+    if (pts.length >= 3) lines.push({ points: pts.map((v) => v.p), normals: pts.map((v) => v.n) });
+  }
+  return lines;
+}
+
+/**
+ * Rim of a cut window: side wall sunk `depth` along -normal (the panel thickness, so the hole reads as cut through
+ * something solid) plus a lip tube of radius `lip` on the edge. Edges shorter than `minLength` are skipped.
+ */
+export function windowRim(edge, opts) {
+  const { depth, lip, minLength, wallMat, lipMat } = need('windowRim', opts, ['depth', 'lip', 'minLength', 'wallMat', 'lipMat']);
+  const grp = new THREE.Group();
+  const { points, normals } = edge;
+  let len = 0;
+  for (let i = 1; i < points.length; i++) len += points[i].distanceTo(points[i - 1]);
+  if (len < minLength) return grp;
+  if (wallMat) {
+    const pos = [], idx = [];
+    points.forEach((p, i) => {
+      const n = normals[i];
+      pos.push(p.x, p.y, p.z, p.x - n.x * depth, p.y - n.y * depth, p.z - n.z * depth);
+      if (i) idx.push((i - 1) * 2, i * 2, (i - 1) * 2 + 1, i * 2, i * 2 + 1, (i - 1) * 2 + 1);
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    const m = wallMat.clone(); m.side = THREE.DoubleSide;
+    grp.add(new THREE.Mesh(g, m));
+  }
+  if (lipMat && lip > 0) {
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+    const n = Math.max(12, Math.round(len / (lip * 1.6)));
+    grp.add(new THREE.Mesh(new THREE.TubeGeometry(curve, n, lip, 8, false), lipMat));
+  }
+  return grp;
+}
+
+// ---------------------------------------------------------------- seam hardware
+
+/**
+ * Hardware along a seam so it reads as a joint, not a drawn line: a liner tube sunk into the gap and clasps that
+ * bridge the gap at an EXACT `pitch` (every `altEvery`-th clasp takes `altMat`). `points`/`normals` describe any
+ * curve you own (normals point out of the surface). With `surfaces` (the plates either side) each clasp is seated by
+ * a ray per side and dropped when either side misses (a window cut it, or the plate turns away). `space` is the
+ * object the group will be added to (matrixWorld converts the ray hits).
+ */
+export function seamHardware(opts) {
+  const { points, normals, pitch, skipEnds, liner, clasp, surfaces, space } = need('seamHardware', opts, ['points', 'normals', 'pitch', 'skipEnds', 'liner', 'clasp', 'surfaces', 'space']);
+  const grp = new THREE.Group();
+  if (points.length < 2) return grp;
+  const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+  const nCurve = new THREE.CatmullRomCurve3(normals.map((n) => n.clone()), false, 'centripetal');
+  const len = curve.getLength();
+  if (liner) {
+    need('seamHardware.liner', liner, ['mat', 'radius', 'sink']);
+    const pts = curve.getSpacedPoints(Math.max(8, Math.round(len / (liner.radius * 2.5)))).map((q, i, a) => q.clone().addScaledVector(nCurve.getPoint(i / (a.length - 1)).normalize(), -liner.sink));
+    grp.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), pts.length * 2, liner.radius, 8, false), liner.mat));
+  }
+  if (clasp) {
+    need('seamHardware.clasp', clasp, ['mat', 'size', 'altEvery']);
+    const [cl, ch, cw] = clasp.size;
+    const count = Math.max(1, Math.floor((len * (1 - 2 * skipEnds)) / pitch));
+    const box = new THREE.BoxGeometry(cl, ch, cw);
+    const T = new THREE.Vector3(), B = new THREE.Vector3(), seatN = new THREE.Vector3();
+    const m = new THREE.Matrix4();
+    const ray = surfaces ? new THREE.Raycaster() : null;
+    const inv = space ? new THREE.Matrix4().copy(space.matrixWorld).invert() : null;
+    const toWorld = (v) => (space ? v.clone().applyMatrix4(space.matrixWorld) : v.clone());
+    const seat = (q, n) => {
+      const hits = [];
+      for (const side of [-1, 1]) {
+        const o = q.clone().addScaledVector(B, side * cw * 0.42).addScaledVector(n, ch * 6);
+        const ow = toWorld(o);
+        ray.set(ow, toWorld(o.clone().sub(n)).sub(ow).normalize());
+        ray.far = ch * 12;
+        const h = ray.intersectObjects(surfaces, false)[0];
+        if (!h || !h.face) return null;
+        hits.push(inv ? h.point.clone().applyMatrix4(inv) : h.point.clone());
+        const fn = h.face.normal.clone().transformDirection(h.object.matrixWorld);
+        if (inv) fn.transformDirection(inv);
+        if (fn.dot(n) < 0) fn.negate();
+        seatN.add(fn);
+      }
+      if (hits[0].distanceTo(hits[1]) > cw * 1.6) return null;
+      const mid = hits[0].add(hits[1]).multiplyScalar(0.5);
+      return mid.distanceTo(q) < cw * 1.2 ? mid : null;
+    };
+    for (let k = 0; k <= count; k++) {
+      const u = skipEnds + ((1 - 2 * skipEnds) * k) / Math.max(1, count);
+      let q = curve.getPointAt(u);
+      curve.getTangentAt(u, T).normalize();
+      let n = nCurve.getPoint(u).normalize();
+      B.crossVectors(T, n).normalize();
+      if (ray) {
+        seatN.set(0, 0, 0);
+        q = seat(q, n);
+        if (!q) continue;
+        n = seatN.normalize();
+        T.addScaledVector(n, -T.dot(n)).normalize();
+        B.crossVectors(T, n).normalize();
+      }
+      const mesh = new THREE.Mesh(box, k % clasp.altEvery === clasp.altEvery - 1 && clasp.altMat ? clasp.altMat : clasp.mat);
+      m.makeBasis(T, n, B);
+      mesh.quaternion.setFromRotationMatrix(m);
+      mesh.position.copy(q).addScaledVector(n, ch * 0.2);
+      grp.add(mesh);
+    }
+  }
+  return grp;
+}
+
+// ---------------------------------------------------------------- toothed rings + radial fins
+
+/** Flat ring (axis +z) with `teeth` rounded teeth on the outside. */
+export function toothedRingGeometry(opts) {
+  const { rOuter, rInner, thick, teeth, toothDepth, bevel } = need('toothedRingGeometry', opts, ['rOuter', 'rInner', 'thick', 'teeth', 'toothDepth', 'bevel']);
+  const s = new THREE.Shape();
+  const n = teeth * 8;
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const wave = 0.5 + 0.5 * Math.cos(a * teeth);
+    const r = rOuter * (1 - toothDepth * (1 - Math.min(1, wave * 2.2)));
+    i ? s.lineTo(Math.cos(a) * r, Math.sin(a) * r) : s.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  const hole = new THREE.Path();
+  for (let i = 0; i <= 48; i++) {
+    const a = -(i / 48) * Math.PI * 2;
+    i ? hole.lineTo(Math.cos(a) * rInner, Math.sin(a) * rInner) : hole.moveTo(Math.cos(a) * rInner, Math.sin(a) * rInner);
+  }
+  s.holes.push(hole);
+  const g = new THREE.ExtrudeGeometry(s, { depth: thick, bevelEnabled: bevel > 0, bevelSize: bevel, bevelThickness: bevel, bevelSegments: 1, curveSegments: 4 });
+  g.translate(0, 0, -thick / 2);
+  return g;
+}
+
+/**
+ * Concentric toothed rings stepping out of a well, adjacent rings turning opposite ways. rings:
+ * `[{rOut, rIn, z, thick, teeth, toothDepth, bevel, mat, spin}]` (all required per ring). With `mirror` every ring is
+ * repeated at -z turning the other way. `update(t, open)` spins them; `open` 0..1 lifts ring i by `spread*(i+1)`.
+ */
+export function ringStack(opts) {
+  const { rings, mirror, spread } = need('ringStack', opts, ['rings', 'mirror', 'spread']);
+  const group = new THREE.Group();
+  const live = [];
+  rings.forEach((rc, i) => {
+    need(`ringStack.rings[${i}]`, rc, ['rOut', 'rIn', 'z', 'thick', 'teeth', 'toothDepth', 'bevel', 'mat', 'spin']);
+    const geo = toothedRingGeometry({ rOuter: rc.rOut, rInner: rc.rIn, thick: rc.thick, teeth: rc.teeth, toothDepth: rc.toothDepth, bevel: rc.bevel });
+    for (const sz of mirror ? [1, -1] : [1]) {
+      const mesh = new THREE.Mesh(geo, rc.mat);
+      mesh.position.z = sz * rc.z;
+      group.add(mesh);
+      live.push({ mesh, spin: rc.spin * sz * (i % 2 ? -1 : 1), z: sz * rc.z, lift: sz * spread * (i + 1) });
+    }
+  });
+  return {
+    group,
+    update(t, open = 0) { for (const r of live) { r.mesh.rotation.z = r.spin * t; r.mesh.position.z = r.z + r.lift * open; } },
+  };
+}
+
+/**
+ * Blades at an exact angular `pitch` between radii r0..r1 over [a0, a1] around +z: every `majorEvery`-th one full
+ * length and thicker, the rest `minorLength` (0..1) of it. Exact pitch is the point; the big/small beat breaks
+ * monotony without randomness. Returns a Group of two InstancedMeshes.
+ */
+export function radialFins(opts) {
+  const { r0, r1, a0, a1, pitch, depth, thick, z, mat, minorMat, majorEvery, minorLength } = need('radialFins', opts, ['r0', 'r1', 'a0', 'a1', 'pitch', 'depth', 'thick', 'z', 'mat', 'minorMat', 'majorEvery', 'minorLength']);
+  const grp = new THREE.Group();
+  const n = Math.floor((a1 - a0) / pitch) + 1;
+  const len = r1 - r0;
+  const blade = (l, t) => { const g = new THREE.BoxGeometry(l, t, depth); g.translate(l / 2, 0, 0); return g; };
+  const big = [], small = [];
+  const o = new THREE.Object3D();
+  for (let i = 0; i < n; i++) {
+    const a = a0 + i * pitch;
+    const major = i % majorEvery === 0;
+    const start = major ? r0 : r0 + len * (1 - minorLength);
+    o.position.set(Math.cos(a) * start, Math.sin(a) * start, z);
+    o.rotation.set(0, 0, a);
+    o.updateMatrix();
+    (major ? big : small).push(o.matrix.clone());
+  }
+  const inst = (geo, material, list) => {
+    const m = new THREE.InstancedMesh(geo, material, list.length);
+    list.forEach((mx, i) => m.setMatrixAt(i, mx));
+    m.instanceMatrix.needsUpdate = true;
+    m.frustumCulled = false; // vendored three has no InstancedMesh bounds
+    return m;
+  };
+  if (big.length) grp.add(inst(blade(len, thick * 1.6), mat, big));
+  if (small.length) grp.add(inst(blade(len * minorLength, thick), minorMat, small));
+  return grp;
+}
+
+// ---------------------------------------------------------------- curve sleeve
+
+/**
+ * Armour sleeve that bends with the curve it rides: a tube over [u0,u1] of a THREE.Curve rebuilt on every `update`
+ * (straight instanced sleeves kink where a limb curls). `profile` = `[[t, scale], ...]` rings along the sleeve,
+ * t in 0..1 (put two rings close for a lip; group 1 is the first ring segment, give it the seam material, group 0
+ * the rest). `axis` fixes the section frame (up = tangent x axis). `arc:[a0,a1]` makes an open shell instead of a
+ * closed tube. `update(curve, u0, u1, radiusAt(u), { rx, rz, offset })` - the elliptic section rx/rz is required.
+ */
+export function curveSleeve(opts) {
+  const { radial, profile, axis, arc } = need('curveSleeve', opts, ['radial', 'profile', 'axis', 'arc']);
+  const rings = profile.length, stride = radial + 1;
+  const g = new THREE.BufferGeometry();
+  const pos = new Float32Array(rings * stride * 3), uv = new Float32Array(rings * stride * 2);
+  const [a0, a1] = arc ?? [0, Math.PI * 2];
+  for (let i = 0; i < rings; i++) for (let j = 0; j <= radial; j++) { uv[(i * stride + j) * 2] = profile[i][0]; uv[(i * stride + j) * 2 + 1] = j / radial; }
+  const idx = [];
+  for (let i = 0; i < rings - 1; i++) for (let j = 0; j < radial; j++) { const a = i * stride + j, b = a + stride; idx.push(a, a + 1, b, b, a + 1, b + 1); }
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.addGroup(radial * 6, (rings - 2) * radial * 6, 0);
+  g.addGroup(0, radial * 6, 1);
+  const cs = Array.from({ length: stride }, (_, j) => { const a = a0 + (j / radial) * (a1 - a0); return [Math.cos(a), Math.sin(a)]; });
+  const P = new THREE.Vector3(), T = new THREE.Vector3(), Y = new THREE.Vector3(), Z = new THREE.Vector3();
+  function update(curve, u0, u1, radiusAt, o) {
+    const { rx, rz } = need('curveSleeve.update', o, ['rx', 'rz']);
+    for (let i = 0; i < rings; i++) {
+      const [t, k] = profile[i];
+      const u = clamp(u0 + (u1 - u0) * t, 0, 1);
+      curve.getPointAt(u, P);
+      curve.getTangentAt(u, T).normalize();
+      Y.crossVectors(T, axis);
+      if (Y.lengthSq() < 1e-8) Y.set(0, 1, 0);
+      Y.normalize();
+      Z.crossVectors(T, Y);
+      if (o.offset) P.add(o.offset);
+      const r = radiusAt(u) * k;
+      for (let j = 0; j <= radial; j++) {
+        const q = (i * stride + j) * 3, [c, s] = cs[j];
+        pos[q] = P.x + (Y.x * c * rx + Z.x * s * rz) * r;
+        pos[q + 1] = P.y + (Y.y * c * rx + Z.y * s * rz) * r;
+        pos[q + 2] = P.z + (Y.z * c * rx + Z.z * s * rz) * r;
+      }
+    }
+    g.attributes.position.needsUpdate = true;
+    g.computeVertexNormals();
+    g.computeBoundingSphere();
+  }
+  return { geometry: g, update };
+}
+
+// ---------------------------------------------------------------- wear into the colour map
+
+/**
+ * Wear painted for the COLOUR map (at viewing distance only colour is visible) plus matching bump / roughness
+ * relief. Every knob 0..1 (count and contrast) and is REQUIRED: read it off the reference, count the cracks, chips
+ * and rivet columns on ONE panel there. A clean reference is a clean panel (all near 0). u runs across the panel,
+ * v along it. Returns `{ bumpMap, roughnessMap, overlay, colorMap(baseColor, tint) }`; `colorMap` composites the
+ * hairlines and chips over a flat base colour and returns a CanvasTexture. `lineScale` thickens lines for panels
+ * seen from far away.
+ */
+export function wearMaps(opts) {
+  const { size, seed, grain, edges, chips, panels, cracks, rivets, lineScale, ink } = need('wearMaps', opts, ['size', 'seed', 'grain', 'edges', 'chips', 'panels', 'cracks', 'rivets', 'lineScale', 'ink']);
+  const rnd = mulberry32(seed >>> 0 || 1);
+  const W = size, s = W / 1024;
+  const mk = () => { const c = document.createElement('canvas'); c.width = c.height = W; return c; };
+  const [bc, rc, oc] = [mk(), mk(), mk()];
+  const [b, r, o] = [bc, rc, oc].map((c) => c.getContext('2d'));
+  b.fillStyle = 'rgb(140,140,140)'; b.fillRect(0, 0, W, W);
+  r.fillStyle = 'rgb(150,150,150)'; r.fillRect(0, 0, W, W);
+  o.strokeStyle = ink; o.fillStyle = ink;
+  for (let i = 0, n = Math.round(4200 * grain); i < n; i++) {
+    const pit = i % 3 === 0, a = 0.08 + 0.16 * grain;
+    b.fillStyle = pit ? `rgba(60,60,60,${a})` : `rgba(215,215,215,${a * 0.7})`;
+    r.fillStyle = pit ? `rgba(225,225,225,${a})` : `rgba(115,115,115,${a * 0.7})`;
+    const x = rnd() * W, y = rnd() * W, w = (2 + rnd() * 14) * s, h = (1 + rnd() * 8) * s;
+    b.fillRect(x, y, w, h); r.fillRect(x, y, w, h);
+  }
+  if (edges > 0) {
+    const ew = 44 * s * (0.5 + edges * 0.5), dk = Math.round(140 - 105 * edges);
+    for (const [x0, x1, flip] of [[0, ew, false], [W - ew, W, true]]) {
+      const gr = b.createLinearGradient(x0, 0, x1, 0);
+      for (const [t, c] of [[0, `rgb(${dk},${dk},${dk})`], [0.55, 'rgb(110,110,110)'], [0.8, 'rgb(185,185,185)'], [1, 'rgba(140,140,140,0)']]) gr.addColorStop(flip ? 1 - t : t, c);
+      b.fillStyle = gr; b.fillRect(x0, 0, x1 - x0, W);
+    }
+  }
+  const chipList = [];
+  for (let i = 0, n = Math.round(140 * chips); i < n; i++) {
+    const cw = (8 + rnd() * 28) * s, ch = (4 + rnd() * 18) * s, x = i % 2 ? W - cw : 0, y = rnd() * W;
+    chipList.push([x, y, cw, ch]);
+    b.fillStyle = 'rgb(28,28,28)'; b.fillRect(x, y, cw, ch);
+    r.fillStyle = 'rgb(235,235,235)'; r.fillRect(x, y, cw, ch);
+    o.fillRect(x, y, cw * 0.7, ch * 0.7);
+  }
+  const rows = Math.round(7 * panels);
+  for (let k = 0; k < rows; k++) {
+    const v = ((k + 1) / (rows + 1)) * W;
+    b.strokeStyle = 'rgb(24,24,24)'; b.lineWidth = 4.5 * s; b.beginPath(); b.moveTo(0, v); b.lineTo(W, v); b.stroke();
+    b.strokeStyle = 'rgb(230,230,230)'; b.lineWidth = 2.5 * s; b.beginPath(); b.moveTo(0, v + 4 * s); b.lineTo(W, v + 4 * s); b.stroke();
+    r.strokeStyle = 'rgb(235,235,235)'; r.lineWidth = 6 * s; r.beginPath(); r.moveTo(0, v); r.lineTo(W, v); r.stroke();
+    o.lineWidth = 2.2 * s * lineScale; o.beginPath(); o.moveTo(0, v); o.lineTo(W, v); o.stroke();
+  }
+  for (let c = 0, n = Math.round(56 * cracks); c < n; c++) {
+    let x = rnd() * W, y = rnd() * W, ang = (rnd() - 0.5) * Math.PI * 1.6;
+    const steps = 6 + Math.floor(rnd() * 7);
+    b.strokeStyle = 'rgba(20,20,20,0.88)'; b.lineWidth = (1.6 + (c % 3) * 0.7) * s;
+    r.strokeStyle = 'rgba(235,235,235,0.85)'; r.lineWidth = 2.4 * s;
+    o.lineWidth = (1.2 + (c % 3) * 0.5) * s * lineScale;
+    for (const g2 of [b, r, o]) { g2.beginPath(); g2.moveTo(x, y); }
+    for (let k = 0; k < steps; k++) {
+      ang += (rnd() - 0.5) * 1.15;
+      const l = (12 + rnd() * 26) * s * Math.sqrt(lineScale);
+      x += Math.cos(ang) * l; y += Math.sin(ang) * l;
+      for (const g2 of [b, r, o]) g2.lineTo(x, y);
+    }
+    for (const g2 of [b, r, o]) g2.stroke();
+  }
+  if (rivets > 0) {
+    const step = (36 / rivets) * s;
+    for (let y = 28 * s; y < W - 20 * s; y += step) for (const x of [36 * s, W - 36 * s]) {
+      b.fillStyle = 'rgb(22,22,22)'; b.beginPath(); b.arc(x, y, 5.2 * s, 0, 6.283); b.fill();
+      r.fillStyle = 'rgb(230,230,230)'; r.beginPath(); r.arc(x, y, 6 * s, 0, 6.283); r.fill();
+      o.beginPath(); o.arc(x, y, 3.2 * s * lineScale, 0, 6.283); o.fill();
+    }
+  }
+  const tex = (c) => { const t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t; };
+  function colorMap(baseColor, tint = null) {
+    const cc = mk(), g2 = cc.getContext('2d');
+    g2.fillStyle = baseColor; g2.fillRect(0, 0, W, W);
+    if (tint) { g2.fillStyle = tint; g2.globalAlpha = 0.18 * edges; g2.fillRect(0, 0, 44 * s, W); g2.fillRect(W - 44 * s, 0, 44 * s, W); g2.globalAlpha = 1; }
+    g2.drawImage(oc, 0, 0);
+    const t = tex(cc);
+    if ('sRGBEncoding' in THREE) t.encoding = THREE.sRGBEncoding;
+    return t;
+  }
+  return { bumpMap: tex(bc), roughnessMap: tex(rc), overlay: oc, colorMap };
 }

@@ -103,6 +103,14 @@ async function loadScenesHtml(url) {
 }
 
 const style = (await import(`../styles/${styleId}/style.js`)).default;
+// ref.json drives defaults (ADR-021): a product world's sibling `ref.json` is handed to the style kernel as `style.ref`
+// (palette -> backdrop / fog / light colour temperature / material tints). Absent or without a palette: nothing changes.
+if (worldOverride && /\.m?js$/.test(worldOverride)) {
+  try {
+    const r = await fetch(new URL('ref.json', new URL(worldOverride, location.href)));
+    if (r.ok) style.ref = await r.json();
+  } catch (e) { /* no ref.json: style defaults */ }
+}
 // `?look={json}` deep-merges over `style.look` for A/B look checks (`tools/lookcheck.py --look`).
 if (q.get('look')) style.look = resolveLook(style.look, JSON.parse(q.get('look')));
 const scenesUrl = contentOverride
@@ -149,6 +157,7 @@ if (typeof worldFactory === 'function') {
   worldInstance = await worldFactory({ canvas, width: W, height: H, scenes: seq.scenes, style });
   if (worldInstance?.canvas) canvas.dataset.world = 'true';
   // Shot list from the world's director (`render.mjs --storyboard`).
+  window.WORLD = worldInstance; // read-only handle for tools/audit.mjs framing check (scene, camera, subjectRoot)
   window.SHOTS = typeof worldInstance?.storyboard === 'function' ? worldInstance.storyboard() : null;
 }
 

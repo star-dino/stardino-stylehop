@@ -66,8 +66,8 @@ export function createStudio3D(THREE, { width, height, look, presets = LOOK_PRES
   }
 
   /** Shot-list director for this camera; create it after the props are built and posed. */
-  function director({ subjects = {}, shots = {} } = {}) {
-    return createDirector(THREE, { camera, scenes, subjects, shots, aspect: framing.aspect, lensBase: baseFov, maxDist });
+  function director({ subjects = {}, shots = {}, cinema = null } = {}) {
+    return createDirector(THREE, { camera, scenes, subjects, shots, aspect: framing.aspect, lensBase: baseFov, maxDist, cinema, lookRig });
   }
 
   /**
@@ -108,5 +108,78 @@ export function createStudio3D(THREE, { width, height, look, presets = LOOK_PRES
     lookRig.render(camera);
   }
 
-  return { canvas, renderer, scene, camera, framing, lookRig, applyShot, director, loadModel, parseModelBuffer, render };
+  /**
+   * Role-id pass (ADR-021 metal brightness check). Call right after `render(frame)`: reads the lit frame from the canvas,
+   * re-renders the same camera with every mesh swapped for a flat colour per material role (metal = red, glaze = green,
+   * liner = blue, anything else black; no fog / environment / AO / contact shadow), reads that, restores everything and
+   * re-renders the normal frame. Returns { role: { share, meanL, p90L } } with `share` = fraction of the frame and
+   * `meanL` = mean CIE L* of the lit pixels with that role. A material counts as `metal` when `userData.role === 'metal'`
+   * or (no role) metalness >= 0.8. Only pixels whose id colour is pure are used (anti-aliased edges are dropped).
+   */
+  function roleReport(frame = null) {
+    const gl = renderer.getContext();
+    const W = canvas.width, H = canvas.height;
+    const read = () => { const b = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b); return b; };
+    const lit = read();
+    const ids = {
+      metal: new THREE.MeshBasicMaterial({ color: 0xff0000, toneMapped: false, fog: false }),
+      glaze: new THREE.MeshBasicMaterial({ color: 0x00ff00, toneMapped: false, fog: false }),
+      liner: new THREE.MeshBasicMaterial({ color: 0x0000ff, toneMapped: false, fog: false }),
+      other: new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false, fog: false }),
+    };
+    const roleOf = (m) => {
+      const r = m.userData?.role;
+      if (r === 'metal' || r === 'glaze' || r === 'liner') return r;
+      if (!r && m.metalness >= 0.8 && !m.transparent) return 'metal';
+      return 'other';
+    };
+    const saved = [];
+    scene.traverse((o) => {
+      if (o.isMesh && o.material) {
+        saved.push([o, o.material, o.visible]);
+        const arr = Array.isArray(o.material);
+        const sw = (m) => {
+          const id = ids[roleOf(m)].clone();
+          id.side = m.side; id.clippingPlanes = m.clippingPlanes; id.clipShadows = m.clipShadows; id.skinning = m.skinning;
+          return id;
+        };
+        o.material = arr ? o.material.map(sw) : sw(o.material);
+        if (o.userData?.isHudOverlay) o.visible = false;
+      } else if (o.isLine || o.isPoints || o.isSprite) {
+        saved.push([o, null, o.visible]);
+        o.visible = false;
+      }
+    });
+    const bg = scene.background, fog = scene.fog, env = scene.environment;
+    scene.background = new THREE.Color(0x000000); scene.fog = null; scene.environment = null;
+    const prevTm = renderer.toneMapping, prevEnc = renderer.outputEncoding;
+    renderer.toneMapping = THREE.NoToneMapping;
+    renderer.render(scene, camera);
+    const idb = read();
+    renderer.toneMapping = prevTm;
+    for (const [o, m, v] of saved) { if (m) { (Array.isArray(o.material) ? o.material : [o.material]).forEach((x) => x.dispose()); o.material = m; } o.visible = v; }
+    scene.background = bg; scene.fog = fog; scene.environment = env;
+    render(frame);
+
+    const lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    const Ls = (r, g, b) => { const y = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b); const f = y > 216 / 24389 ? Math.cbrt(y) : (24389 / 27 * y + 16) / 116; return 116 * f - 16; };
+    const acc = { metal: [], glaze: [], liner: [] };
+    for (let i = 0; i < W * H * 4; i += 4) {
+      const r = idb[i], g = idb[i + 1], b = idb[i + 2];
+      let k = null;
+      if (r > 250 && g < 5 && b < 5) k = 'metal'; else if (g > 250 && r < 5 && b < 5) k = 'glaze'; else if (b > 250 && r < 5 && g < 5) k = 'liner';
+      if (k) acc[k].push(Ls(lit[i], lit[i + 1], lit[i + 2]));
+    }
+    const out = {};
+    for (const [k, a] of Object.entries(acc)) {
+      if (!a.length) { out[k] = { share: 0, meanL: 0, p90L: 0 }; continue; }
+      a.sort((x, y) => x - y);
+      out[k] = { share: a.length / (W * H), meanL: a.reduce((s, v) => s + v, 0) / a.length, p90L: a[Math.floor(a.length * 0.9)] };
+    }
+    return out;
+  }
+
+  const api = { canvas, renderer, scene, camera, framing, lookRig, applyShot, director, loadModel, parseModelBuffer, render, roleReport };
+  if (typeof globalThis !== 'undefined') globalThis.__stylehopStudio = api; // read by tools/render.mjs / tools/audit.mjs
+  return api;
 }

@@ -8,7 +8,7 @@ export default {
   defaultOverlay: 'none',
   kernel: './kernel.js',
   world: './world.js',
-  soundPreset: 'terminal',
+  soundPreset: 'industrial-mech',
   paperTexture: '../assets/textures/brushed_metal.png',
   bestFor: [
     '机械原理 / 结构拆解 / 剖视解释（发动机、泵、减速箱、连杆机构）',

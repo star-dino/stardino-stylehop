@@ -1,49 +1,41 @@
 <!--
-  Calibration Lab · Pure 3D Timeline (`styles/calibration-lab/scenes.html`).
-
-  Authoring contract:
-  1. Pure 3D visual stage: the 3D sample (`world.js`) IS the video. Every `<section>` stays free of
-     inspection plaques, parameter cards or floating UI badges; the instrument readouts are drawn
-     inside the 3D frame by the kernel HUD (`kernel.js -> createGaugeHud`).
-  2. Four scenes, four jobs: run → section → explode → measurement. Durations belong to the story,
-     not to a template; keep the job of each scene, not its exact length.
-  3. `data-cues` use the engine foley kinds (brass_ratchet / scale_tilt / card_enter / count_tick),
-     aligned with the crank pass, the cut sweep and the layer separations in `world.js`.
+  Mechanical Humpback Whale · SUBJECT_0017 (`scenes.html`)
+  4-Scene 16.0s Aquatic Biomechatronics Showcase
 -->
 
-<!-- Scene 01 · The sample runs on the bench, readouts already live (0.0s – 4.2s) -->
+<!-- Scene 01 · Leviathan Cruise & Cranial Sonar Awakening (0.0s – 4.0s) -->
 <section
   class="frame scene"
-  data-scene="lab-run"
-  data-title="01 · Sample on the bench"
-  data-dur="4.2"
-  data-cues="0.14:brass_ratchet:crank-tick-1:0.62, 0.72:brass_ratchet:crank-tick-2:0.55, 1.42:count_tick:rev-counter:0.4, 2.30:brass_ratchet:crank-tick-3:0.48"
-></section>
-
-<!-- Scene 02 · Section A–A: the cut sweeps through, the bore opens (4.2s – 8.2s) -->
-<section
-  class="frame scene"
-  data-scene="lab-section"
-  data-title="02 · Section A–A"
+  data-scene="whale-cruise"
+  data-title="01 · Leviathan Cruise"
   data-dur="4.0"
-  data-cues="0.10:scale_tilt:cut-sweep:0.72, 0.95:count_tick:bore-reveal:0.52, 1.80:brass_ratchet:piston-pass:0.5, 2.60:count_tick:indicator-dot:0.36"
+  data-cues="0.12:scale_tilt:sonar-ping-1:0.68, 0.85:brass_ratchet:spine-wave-1:0.54, 1.75:count_tick:telemetry-lock:0.42, 2.65:brass_ratchet:fin-stroke-1:0.50"
 ></section>
 
-<!-- Scene 03 · Exploded in assembly order, dimensions travel with the layers (8.2s – 12.2s) -->
+<!-- Scene 02 · Longitudinal Cutaway: Phased-Array Sonar Core & 14-Ring Spinal Linkage (4.0s – 8.0s) -->
 <section
   class="frame scene"
-  data-scene="lab-explode"
-  data-title="03 · Assembly order"
+  data-scene="whale-cutaway"
+  data-title="02 · Sonar Core & Spinal Linkage"
   data-dur="4.0"
-  data-keyframe="0.42"
-  data-cues="0.35:card_enter:layer-crank:0.7, 0.75:card_enter:layer-piston:0.66, 1.20:card_enter:layer-head:0.62, 1.65:card_enter:layer-cam:0.58"
+  data-cues="0.10:scale_tilt:cutaway-open:0.74, 0.92:count_tick:sonar-burst:0.58, 1.80:brass_ratchet:linkage-drive:0.55, 2.75:count_tick:acoustic-lock:0.44"
 ></section>
 
-<!-- Scene 04 · Measurement: lift curves and the part doing the work (12.2s – 16.0s) -->
+<!-- Scene 03 · Exploded Hydro-Armor & Multi-Axis Pectoral Thrusters (8.0s – 12.0s) -->
 <section
   class="frame scene"
-  data-scene="lab-valves"
-  data-title="04 · Valvetrain measurement"
-  data-dur="3.8"
-  data-cues="0.16:count_tick:intake-peak:0.56, 0.62:count_tick:exhaust-peak:0.5, 1.30:brass_ratchet:cam-pass:0.44"
+  data-scene="whale-exploded"
+  data-title="03 · Exploded Hydro-Kinematics"
+  data-dur="4.0"
+  data-keyframe="0.50"
+  data-cues="0.18:card_enter:hull-explode-1:0.70, 0.68:card_enter:hull-explode-2:0.65, 1.35:brass_ratchet:pectoral-gimbal:0.58, 2.20:count_tick:tail-vector:0.48"
+></section>
+
+<!-- Scene 04 · Full Blueprint Telemetry Poster Framing (12.0s – 16.0s) -->
+<section
+  class="frame scene"
+  data-scene="whale-blueprint"
+  data-title="04 · Full Blueprint Telemetry"
+  data-dur="4.0"
+  data-cues="0.15:scale_tilt:blueprint-lock:0.66, 0.95:count_tick:sonar-ping-final:0.54, 1.90:brass_ratchet:harmonic-cruise:0.48"
 ></section>

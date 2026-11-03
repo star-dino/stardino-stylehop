@@ -347,6 +347,24 @@ varying vec2 vUv;
 uniform float intensity;
 uniform sampler2D tDiffuse;
 uniform highp sampler2D tDepth;
+uniform highp sampler2D tNormal;
+uniform vec2 resolution;
+uniform float cameraNear;
+uniform float cameraFar;
+uniform float inkStrength;
+uniform vec3 inkColor;
+
+#include <common>
+#include <packing>
+
+float linD(const in vec2 uv) {
+  float z = texture2D(tDepth, uv).x * 2.0 - 1.0;
+  return (2.0 * cameraNear * cameraFar) / max(1e-5, cameraFar + cameraNear - z * (cameraFar - cameraNear));
+}
+
+vec3 rdN(const in vec2 uv) {
+  return unpackRGBToNormal(texture2D(tNormal, uv).rgb);
+}
 
 void main() {
   float d = texture2D(tDepth, vUv).x;
@@ -356,6 +374,29 @@ void main() {
   }
   vec4 texel = texture2D(tDiffuse, vUv);
   vec3 ao = mix(vec3(1.0), clamp(texel.rgb, 0.0, 1.0), clamp(intensity, 0.0, 1.0));
+
+  if (inkStrength > 0.001) {
+    vec2 stepUv = 1.0 / max(resolution, vec2(1.0));
+    float d0 = linD(vUv);
+    float maxJump = d0 * 2.5;
+    float dR = min(linD(vUv + vec2(stepUv.x, 0.0)), maxJump);
+    float dL = min(linD(vUv - vec2(stepUv.x, 0.0)), maxJump);
+    float dU = min(linD(vUv + vec2(0.0, stepUv.y)), maxJump);
+    float dD = min(linD(vUv - vec2(0.0, stepUv.y)), maxJump);
+    float lap = abs(dR + dL + dU + dD - 4.0 * d0) / max(d0, 0.5);
+    float eD = smoothstep(0.004, 0.016, lap);
+
+    vec3 n0 = rdN(vUv);
+    float dRraw = texture2D(tDepth, vUv + vec2(stepUv.x, 0.0)).x;
+    float dUraw = texture2D(tDepth, vUv + vec2(0.0, stepUv.y)).x;
+    vec3 nR = dRraw < 0.9999 ? rdN(vUv + vec2(stepUv.x, 0.0)) : n0;
+    vec3 nU = dUraw < 0.9999 ? rdN(vUv + vec2(0.0, stepUv.y)) : n0;
+    float eN = smoothstep(0.32, 0.72, max(length(n0 - nR), length(n0 - nU)));
+
+    float edge = clamp(max(eD, eN * 0.68) * inkStrength, 0.0, 1.0);
+    ao *= mix(vec3(1.0), inkColor, edge);
+  }
+
   gl_FragColor = vec4(ao, 1.0);
 }
 `;
@@ -448,7 +489,13 @@ export function createGTAORig(THREE, { renderer, scene, options = {} }) {
     uniforms: {
       tDiffuse: { value: pdRenderTarget.texture },
       tDepth: { value: depthTexture },
+      tNormal: { value: normalRenderTarget.texture },
+      resolution: { value: new THREE.Vector2(width, height) },
+      cameraNear: { value: 0.1 },
+      cameraFar: { value: 100.0 },
       intensity: { value: options.intensity ?? 0.72 },
+      inkStrength: { value: options.inkStrength ?? 0.0 },
+      inkColor: { value: new THREE.Color(options.inkColor ?? '#181C22') },
     },
     vertexShader: PASS_VS,
     fragmentShader: BLEND_FS,
@@ -486,11 +533,14 @@ export function createGTAORig(THREE, { renderer, scene, options = {} }) {
       pdRenderTarget.setSize(width, height);
       gtaoMaterial.uniforms.resolution.value.set(width, height);
       pdMaterial.uniforms.resolution.value.set(width, height);
+      blendMaterial.uniforms.resolution.value.set(width, height);
     }
   }
 
   function applyConfig(cfg = {}) {
     if (cfg.intensity !== undefined) blendMaterial.uniforms.intensity.value = cfg.intensity;
+    if (cfg.inkStrength !== undefined) blendMaterial.uniforms.inkStrength.value = cfg.inkStrength;
+    if (cfg.inkColor !== undefined) blendMaterial.uniforms.inkColor.value.set(cfg.inkColor);
     if (cfg.radius !== undefined) gtaoMaterial.uniforms.radius.value = cfg.radius;
     if (cfg.distanceExponent !== undefined) gtaoMaterial.uniforms.distanceExponent.value = cfg.distanceExponent;
     if (cfg.thickness !== undefined) gtaoMaterial.uniforms.thickness.value = cfg.thickness;
@@ -564,6 +614,8 @@ export function createGTAORig(THREE, { renderer, scene, options = {} }) {
     gtaoMaterial.uniforms.cameraFar.value = camera.far;
     gtaoMaterial.uniforms.cameraProjectionMatrix.value.copy(camera.projectionMatrix);
     gtaoMaterial.uniforms.cameraProjectionMatrixInverse.value.copy(camera.projectionMatrixInverse);
+    blendMaterial.uniforms.cameraNear.value = camera.near;
+    blendMaterial.uniforms.cameraFar.value = camera.far;
 
     renderer.setRenderTarget(gtaoRenderTarget);
     renderer.setClearColor(0xffffff, 1.0);

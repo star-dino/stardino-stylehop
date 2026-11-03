@@ -183,6 +183,23 @@ export function frameShot(shot, box, lens, k = 0) {
   return { pos, target, fov, roll, size: size.name };
 }
 
+/** Spherical glide between two camera states with swing-proportional pull-back (opt-in `cinema.pullback`). */
+function glide(a, b, k, amount) {
+  const sph = (s) => {
+    const v = [s.pos[0] - s.target[0], s.pos[1] - s.target[1], s.pos[2] - s.target[2]];
+    const d = Math.hypot(...v);
+    return { d, az: Math.atan2(v[0], v[2]), el: Math.asin(clamp(v[1] / d, -1, 1)) };
+  };
+  const A = sph(a), B = sph(b);
+  const daz = ((B.az - A.az + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+  const swing = Math.min(1, Math.abs(daz) / (Math.PI / 2));
+  const target = a.target.map((v, i) => lerp(v, b.target[i], k));
+  const az = A.az + daz * k, el = lerp(A.el, B.el, k);
+  const d = lerp(A.d, B.d, k) * (1 + amount * swing * Math.sin(Math.PI * k));
+  const pos = [target[0] + d * Math.sin(az) * Math.cos(el), target[1] + d * Math.sin(el), target[2] + d * Math.cos(az) * Math.cos(el)];
+  return { ...b, pos, target, fov: lerp(a.fov, b.fov, k), roll: lerp(a.roll || 0, b.roll || 0, k) };
+}
+
 /**
  * Shot-list director bound to a THREE camera.
  * @param {object} THREE
@@ -194,8 +211,19 @@ export function frameShot(shot, box, lens, k = 0) {
  * @param {number} [opts.aspect]   defaults to camera.aspect
  * @param {number} [opts.lensBase=31]  landscape fov that `shot.fov` values are written against
  * @param {number} [opts.maxDist]      cap on camera distance (set edge / fog falloff)
+ * @param {boolean|object} [opts.cinema]  OPT-IN cinema defaults (absent = exactly the old behaviour):
+ *   drift     {yaw=2.5, push=0.04}  slow drift on every shot (yaw degrees and fractional push-in over the shot),
+ *             skipped per axis where the shot already has an `orbit` / `push` / `pull` move; `drift: false` on a shot opts out
+ *   pullback  {amount=0.25, dur=1.2}  a shot with `blend: <seconds>` (or dur from `pullback.dur` when `blend: true`)
+ *             glides in from the previous shot's end pose instead of cutting; the path is spherical (azimuth/elevation/
+ *             distance around the lerped target) and pulls back by `amount * swing`, swing = azimuth change / 90deg (clamped),
+ *             so a big swing clears the subject and a small swing is a straight dolly
+ *   fog       true  fog density scales with 1/(camera distance) relative to the first shot, so the subject keeps the
+ *             same haze at any distance (needs `lookRig`, passed by studio.director)
  */
-export function createDirector(THREE, { camera, scenes = [], subjects = {}, shots = {}, aspect = null, lensBase = 31, maxDist = null }) {
+export function createDirector(THREE, { camera, scenes = [], subjects = {}, shots = {}, aspect = null, lensBase = 31, maxDist = null, cinema = null, lookRig = null }) {
+  // Opt-in cinema defaults (ADR-021; `cinema: true` or an object). All off unless named, so existing products are unchanged.
+  const cin = cinema === true ? { drift: true, pullback: true, fog: true } : cinema || {};
   // camera.fov is already adapted to the aspect (portrait/square get a wider lens);
   // `shot.fov` is written for landscape and scaled the same way.
   const baseFov = camera.fov;
@@ -350,7 +378,14 @@ export function createDirector(THREE, { camera, scenes = [], subjects = {}, shot
       box = blendBoxes(box, core, clamp(shot.coreWeight ?? 0.72, 0, 1));
     }
     const lens = { fov: shot.fov ? shot.fov * fovScale : baseFov, aspect: lensAspect, maxDist };
-    const framed = { ...shot, fov: lens.fov, fill: shot.fill ?? fill, angle: (shot.angle ?? 0) + (live ? yaw : 0) };
+    let framed = { ...shot, fov: lens.fov, fill: shot.fill ?? fill, angle: (shot.angle ?? 0) + (live ? yaw : 0) };
+    if (cin.drift && shot.drift !== false) {
+      const d = typeof cin.drift === 'object' ? cin.drift : {};
+      const mv = parseMoves(shot.move);
+      const kd = k * 2 - 1; // centred so the shot's framed pose is the middle of the drift
+      if (!mv.includes('orbit')) framed.angle += (d.yaw ?? 2.5) * kd;
+      if (!mv.includes('push') && !mv.includes('pull')) framed = { ...framed, move: [...mv, 'push'].join('+'), amount: (shot.amount ?? 1) * ((d.push ?? 0.04) / 0.24) };
+    }
     return frameShot(framed, box, lens, k);
   }
 
@@ -388,14 +423,26 @@ export function createDirector(THREE, { camera, scenes = [], subjects = {}, shot
     return best; // -1 = no character in frame
   }
   let board = null;
+  let refDist = null;
 
   /** Frame the camera for `frame`; returns the picked shot, or null if this scene has no list. */
   function update(frame) {
     const p = pick(frame);
     if (!p) return null;
     const { shot } = p;
-    const state = shotState(shot, ease(p.u, shot.ease));
+    let state = shotState(shot, ease(p.u, shot.ease));
+    const bl = cin.pullback && shot.blend ? (shot.blend === true ? cin.pullback.dur ?? 1.2 : shot.blend) : 0;
+    const into = p.localT - shot.start;
+    if (bl > 0 && p.index > 0 && into < bl) {
+      const prev = layoutFor(frame.scene || scenes[frame.sceneIndex ?? 0])[p.index - 1];
+      state = glide(shotState(prev, ease(1, prev.ease)), state, smootherstep(0, 1, into / bl), cin.pullback.amount ?? 0.25);
+    }
     applyMicroMotion(state, shot, p.localT);
+    if (cin.fog && lookRig?.setFogScale) {
+      const dist = Math.hypot(state.pos[0] - state.target[0], state.pos[1] - state.target[1], state.pos[2] - state.target[2]);
+      if (refDist == null) refDist = dist;
+      lookRig.setFogScale(refDist / Math.max(dist, 1e-3));
+    }
     applyThreeCamera(camera, state);
     const entry = board?.find((e) => e.scene === (frame.scene?.index ?? frame.sceneIndex) && e.shot === p.index);
     if (entry && !entry.checked && Math.abs((frame.t ?? -1) - entry.t) < 0.02) {
