@@ -160,8 +160,6 @@ styles/            多场景风格目录：
                    - clay-macaron/（3D 软陶定格 · kernel.js 介质 + world.js 示例故事 + 角色 / 布景零件）
                    - twilight-fable/（微光绘本寓言 · 双层法线边缘光 + 奶油散景 + Q 版与写实生灵双轨）
                    - ink-wash/（宣纸水墨诗卷 · 多笔毫飞白/披麻皴生成式原语 + 宣纸洇墨着色器）
-                   - paper-popup/（3D 纸雕立体书 · 剪纸轮廓卡与镂空开窗 + V 折脊柱机关 + 折痕绽放折纸鸟兽与纸船 + 特艺色月拱）
-                   - rubber-hose/（1930s 橡皮管卡通 · 12fps 手绘沸腾线 + 无关节面条四肢/扇形缺口眼 + Ben-Day 网点 + 特艺声波环）
                    - vintage-naturalist/（复古博物学 · 铜版画蚀刻/黄铜仪表内核 + 15s 雀喙标本样片 + 23px 字号红线）
                    - calibration-lab/（计量实验室 · 纯 3D 机械剖视：刻线台面 + 世界空间剖切 + 分阶段爆炸 + 同源仪表 HUD + samples.json 采样层）
 showcase/          宣发物料与历史归档（画廊吉祥物「星芒史莱姆」九界短片等，与 styles/ 完全解耦）
