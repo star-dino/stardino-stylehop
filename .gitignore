@@ -52,8 +52,7 @@ backup_original_audio/
 !styles/**/contact_sheet.png
 !styles/**/contact_sheet.jpg
 !styles/**/look_baseline.jpg
-!showcase/**/contact_sheet*.png
-!showcase/**/contact_sheet*.jpg
+!styles/*/lineage/**/img/*.jpg
 !assets/textures/*.png
 *.log
 

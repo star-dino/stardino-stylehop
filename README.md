@@ -28,6 +28,18 @@
 
 ---
 
+## 机械鹦鹉螺 · calibration-lab 的来历
+
+![机械鹦鹉螺：早期 → 重做 → 迭代](styles/calibration-lab/lineage/mech-nautilus/img/lineage-strip.jpg)
+
+| 核心 | 拆解 |
+| :--: | :--: |
+| ![核心特写](styles/calibration-lab/lineage/mech-nautilus/img/core.jpg) | ![分步拆解](styles/calibration-lab/lineage/mech-nautilus/img/explode.jpg) |
+
+由 Gemini 实现、作者逐轮把关：**早期**照原项目直接做，外形不对；**重做**时外壳改在 Blender 里建模，这一版起已接近参考；之后的**迭代**都在抠细节。其中通用的部分沉淀成了 `calibration-lab` 的机器感原语与 `lookcheck.py --gates` 关卡。过程、源码与 Blender 外壳见 [`styles/calibration-lab/lineage/mech-nautilus/`](styles/calibration-lab/lineage/mech-nautilus/README.md)。
+
+---
+
 ## 快速开始
 
 ```bash

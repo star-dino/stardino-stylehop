@@ -1,0 +1,21 @@
+{
+  "duration": 26.0,
+  "fps": 60,
+  "beats": {
+    "hero_overview": 0.0,
+    "labels_on": 2.2,
+    "core_closeup": 3.8,
+    "core_teardown_peak": 5.4,
+    "septa_closeup": 7.8,
+    "septa_teardown_peak": 9.4,
+    "tentacles_closeup": 11.6,
+    "tentacles_teardown_peak": 12.9,
+    "jets_closeup": 14.5,
+    "jets_teardown_peak": 15.8,
+    "hero_wide_return": 17.3,
+    "full_explode_open": 18.0,
+    "full_explode_peak": 19.6,
+    "full_explode_close": 21.8,
+    "hero_reassembled": 23.4
+  }
+}

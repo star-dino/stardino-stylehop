@@ -1,0 +1,61 @@
+{
+  "image": "refs/nautilus.png",
+  "crop": [
+    20,
+    40,
+    1510,
+    662
+  ],
+  "exclude": [
+    [
+      20,
+      40,
+      320,
+      240
+    ],
+    [
+      330,
+      40,
+      380,
+      200
+    ],
+    [
+      720,
+      40,
+      220,
+      100
+    ],
+    [
+      1395,
+      40,
+      260,
+      150
+    ],
+    [
+      1445,
+      190,
+      220,
+      80
+    ],
+    [
+      1480,
+      270,
+      200,
+      150
+    ]
+  ],
+  "free": [330, 205, 1310, 725],
+  "view": "slightly low 3/4 side view from the front-left (~16° off profile, camera ~4° below umbilicus centre, fov 28°), tentacles sweeping left (-X) and spiral shell on the right (+X)",
+  "masses": [
+    "spiral shell structure (right 52% of length, 12.0 m diameter logarithmic whorl, deepest at ventral belly and highest at dorsal crest)",
+    "ventral cheek / aperture lobe (large curved white composite armor plate wrapping the lower-front side of the shell opening)",
+    "dorsal hood / cephalic shield (low-angled white armor visor extending forward over the optical sensor and tentacle roots)",
+    "optical sensor / eye module (prominent glowing orange-gold concentric iris ring assembly beneath the dorsal hood)",
+    "tentacle array (left 48% of length, multi-segmented white-plated appendages sweeping forward and downward in an S-curve fan)",
+    "aft propulsion system (cluster of 4 omnidirectional water-jet thruster nozzles protruding from the lower-rear shell)"
+  ],
+  "skin": "≈60% of the shell stays on. Open in the hero view: the upper-front shell between the umbilicus and the outer whorl (septa, drive and vanes showing), and the head bay between the eye and the umbilicus. Closed: the outer whorl band, the ventral cheek lobe, the hood",
+  "density": "primary: umbilicus command core & hub, spiral septum bulkheads, omnidirectional water-jet propulsion cluster, optical sensor eye, dorsal cephalic hood · secondary: radial I-beam ribs, pressure chamber manifolds, articulated tentacle links, hydraulic cylinders · tertiary: counterbore bosses, socket bolts, braided hoses, brass seam inlays",
+  "palette": "armour warm ceramic white #F3F1EC / #ECE8E0 · seams and gaps copper #C8763C (dark copper in the gap) · mechanism steel #D8DDE3, titanium, gunmetal #4A5059, brass fittings · accent amber-orange only on the eye and jet glow",
+  "wear": "hairline branching cracks on most plates, chipped plate edges, a rivet row along each seam, 2-3 panel lines per plate; no dirt or grime"
+}
