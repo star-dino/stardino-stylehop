@@ -96,7 +96,7 @@
 
 `kernel.js` §8 adds generative primitives (method borrowed from the MIT `teardown` skill, see `CREDITS.md` §D). **Admission rules**: no species / object names; **no good-looking defaults, a missing parameter throws** (take every number from your reference reading and list it in the product's `TREATMENT.md`); shape + material role only, never colour; each primitive is demonstrated on two different subjects.
 
-| Primitive | Behaviour | Subject 1: `rhino-beetle-v1` | Subject 2: `primitive-demo-v1` (rotary pump) |
+| Primitive | Behaviour | Subject 1: `rhino-beetle-v1` | Subject 2: `primitive-demo-t1` (rotary pump) |
 | :-- | :-- | :-- | :-- |
 | `cutWindow` + `windowRim` | signed-function window with exact clipping, outline held by a band; rim wall + lip | two windows in the abdominal deck over the wing hinges | eccentric window in the cast cover over the impeller |
 | `seamHardware` | sunk liner + clasps at an exact pitch, ray-seated on both plates when `surfaces` is given | elytral suture (seated) + pronotum/elytron seam | circular flange (`surfaces: null`, unseated) |
@@ -139,7 +139,7 @@
 
 旧写法 `palette.sampled_hex`（`studio_backdrop`、`shell_glaze_mid`、`mechanism_dark_steel`、`focal_accent_orange`、`eye_emissive_orange`、`mechanism_muted_bronze`）经固定别名表读取，旧 `ref.json` 不用改。链路：`gallery/player.html` 把 `?world=` 同目录的 `ref.json` 作为 `style.ref` 交给内核；内核解析顺序 `LOOK_DEFAULTS < CAL_LOOK < ref 派生 < style.look（成品覆盖）`。风格保留结构（照度、keyRatio、阴影、AO、材质粗糙度/金属度/贴图/角色）；**不声明 palette 则什么都不派生，外观与此前逐像素一致**。成品在 `world.js` 里显式写的 `look.*` 叶子仍然优先——所以想让参考色生效，就不要在 world 里再硬写一遍冷灰背景。
 
-**9.2 角色影棚（`glaze` / `metal` 角色自动）。** world 一旦用了这两个角色（`governMaterialRole`），内核在渲染时通知 look rig，自动补齐：① **柔光箱环境**（`env.softboxRig`：五块亮面板——顶、主光侧、轮廓光侧、前侧细条、前方暗淡大卡——立在更暗的环境里；金属只反射它看到的东西，全亮环境=灰塑料，全暗=黑洞；金属/釉面的 IBL 强度另乘角色增益 金属 x4 / 釉面 x2，因为金属没有漫反射项）；② `keyRatio >= 3`（主光 >= 3x 全部补光之和，轮廓光不计入补光）；③ **轮廓光**（`light.rim`，主光反侧后上方，强度 = 主光 x 0.32，不投影）。没有这两类角色的 world 不受影响。**显式退出**：`look.studio = { auto: false }` 整体关闭，或 `{ softbox: false, keyRatio: false, rim: false }` 逐项关闭（`render.mjs --look '{"studio":{"auto":false}}'` 可在命令行试）。注意：已有用了 `glaze`/`metal` 的成品（`rhino-beetle-v1`、`primitive-demo-v1`、`mech-nautilus-v1`）重渲会变（金属变亮、釉面出高光、多一条轮廓光）；这是设计内行为。
+**9.2 角色影棚（`glaze` / `metal` 角色自动）。** world 一旦用了这两个角色（`governMaterialRole`），内核在渲染时通知 look rig，自动补齐：① **柔光箱环境**（`env.softboxRig`：五块亮面板——顶、主光侧、轮廓光侧、前侧细条、前方暗淡大卡——立在更暗的环境里；金属只反射它看到的东西，全亮环境=灰塑料，全暗=黑洞；金属/釉面的 IBL 强度另乘角色增益 金属 x4 / 釉面 x2，因为金属没有漫反射项）；② `keyRatio >= 3`（主光 >= 3x 全部补光之和，轮廓光不计入补光）；③ **轮廓光**（`light.rim`，主光反侧后上方，强度 = 主光 x 0.32，不投影）。没有这两类角色的 world 不受影响。**显式退出**：`look.studio = { auto: false }` 整体关闭，或 `{ softbox: false, keyRatio: false, rim: false }` 逐项关闭（`render.mjs --look '{"studio":{"auto":false}}'` 可在命令行试）。注意：已有用了 `glaze`/`metal` 的成品（`rhino-beetle-v1`、`primitive-demo-t1`、`mech-nautilus-v1`）重渲会变（金属变亮、釉面出高光、多一条轮廓光）；这是设计内行为。
 
 **9.3 关卡（warn 默认，`--strict-gates` 才失败）。** 调用：`python3 tools/lookcheck.py --style calibration-lab --world <p>/world.js --content <p>/scenes.html --gates`（`--gates-only` 只跑关卡、不写基线；无 `--world` 则查风格默认世界且无参考）。以 `ref.json` 的 `image` 为参考（对参考图本身测量，不是对你写的色板），在每个镜头的无损帧上：
 
