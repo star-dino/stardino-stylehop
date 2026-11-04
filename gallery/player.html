@@ -110,6 +110,12 @@ if (worldOverride && /\.m?js$/.test(worldOverride)) {
     const r = await fetch(new URL('ref.json', new URL(worldOverride, location.href)));
     if (r.ok) style.ref = await r.json();
   } catch (e) { /* no ref.json: style defaults */ }
+} else if (!worldOverride) {
+  // The style's own default world may declare a sibling ref.json too (calibration-lab's nautilus does).
+  try {
+    const r = await fetch(new URL(`../styles/${styleId}/ref.json`, location.href));
+    if (r.ok) style.ref = await r.json();
+  } catch (e) { /* none */ }
 }
 // `?look={json}` deep-merges over `style.look` for A/B look checks (`tools/lookcheck.py --look`).
 if (q.get('look')) style.look = resolveLook(style.look, JSON.parse(q.get('look')));

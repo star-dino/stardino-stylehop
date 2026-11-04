@@ -32,7 +32,7 @@
      - `createSubsystemRig`：注册各子系统的局部拆解导轨向量（`explodeVec`）、局部铰链旋转轴（`rotAxis` / `rotAngle`）与材质表，支持按子系统状态权重独立开启（如 `COVER OPEN` / `MANTLE OPEN` / `ARM APART` / `TEARDOWN`）以及非焦点子系统的半透明幽灵化隔离（`solo` / `soloFade`）；
      - `createTeardownController`：状态机分镜控制器，同步驱动子系统状态插值、底部控制台模式按钮高亮、**自动防重叠排布的 3D-to-2D 折线引线标注（`callouts`）**以及带点击波纹环的自动化操作游标（`cursor`）。
    - **工业 CSG-2D 孔槽特征、真 Stencil 剖切封盖（`createSectionCutManager`）与物理场着色器（`createPressureFieldMaterial`）**。
-2. **`world.js`（默认样片）**：单缸四冲程。常数 `K`（缸径 84 / 曲柄 43 / 连杆 143 / 压缩高 24 / 缸面 210 / CR 9.5）→ 滑块曲柄闭式解 + 气门升程窗；`update(th, ops)` 摆位。删除本文件后，kernel 仍能构建任意机械或仿生机构。
+2. **`world.js`（默认样片）**：机械鹦鹉螺 Archive / 007（5 幕 7 镜 26.0s：巡航 → 核心 → 隔板 → 触手 → 喷口/爆炸），由 teardown 最终版移植。题材代码全部在 `sample/`（`nautilus-model.js` 模型、`kin.js` 运动学、`palette.js`、`kit-compat*` 把 teardown kit 接口跑在 r147 上、`hull.glb` Blender 外壳），kernel 不含任何题材名。背景与光色由同目录 `ref.json` 驱动（参考为最终版自己的渲染）。来历见 `lineage/mech-nautilus/`。删除 `world.js` 与 `sample/` 后，kernel 仍能构建任意机械或仿生机构。
 3. **零复用规则**：新题材必须重写 `world.js`，不得把本样片的道具当贴纸拼贴（ADR-013）。
 
 ---

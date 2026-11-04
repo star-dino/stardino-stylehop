@@ -1,0 +1,175 @@
+{
+  "image": "ref/hero.png",
+  "mask": "ref/hero_mask.png",
+  "axis": "x",
+  "hero_shot": 0,
+  "limb_dominated": true,
+  "free": [
+    0.18,
+    0.23,
+    0.86,
+    0.8
+  ],
+  "source": "作者最终版渲染（teardown 工作台）：teardown nautilus-film，t=0.5s hero 镜头，1600x900 @ dpr1.2 = 1920x1080，含 HUD 面板；mask 为同相机的 --mask 剪影渲染（无 HUD、无地面阴影）",
+  "crop": {
+    "canvas_px": [
+      1920,
+      1080
+    ],
+    "subject_bbox_px": [
+      371,
+      266,
+      1603,
+      827
+    ],
+    "subject_size_px": [
+      1232,
+      561
+    ],
+    "aspect_w_over_h": 2.196,
+    "height_over_length": 0.455,
+    "exclude_boxes_px": [
+      {
+        "name": "archive_title_panel",
+        "rect": [
+          20,
+          15,
+          380,
+          285
+        ]
+      },
+      {
+        "name": "ortho_profile_panel",
+        "rect": [
+          380,
+          15,
+          785,
+          240
+        ]
+      },
+      {
+        "name": "sequence_panel",
+        "rect": [
+          20,
+          285,
+          305,
+          375
+        ]
+      },
+      {
+        "name": "internal_section_panel",
+        "rect": [
+          1575,
+          15,
+          1895,
+          295
+        ]
+      },
+      {
+        "name": "camera_views_and_display_modes_panels",
+        "rect": [
+          1595,
+          640,
+          1895,
+          870
+        ]
+      },
+      {
+        "name": "front_view_telemetry_panel",
+        "rect": [
+          20,
+          880,
+          380,
+          1065
+        ]
+      },
+      {
+        "name": "timeline_panel",
+        "rect": [
+          380,
+          880,
+          1205,
+          1065
+        ]
+      },
+      {
+        "name": "septa_overview_panel",
+        "rect": [
+          1205,
+          880,
+          1895,
+          1065
+        ]
+      }
+    ]
+  },
+  "view": {
+    "orientation": "anterior-left (-X, tentacles), posterior-right (+X, whorl), dorsal up, port side toward camera (+Z); pure broadside",
+    "camera_type": "hero: az 0 (drift +2.5 deg over 3.8 s), el 0, fov 28 (vertical), target (-0.18,-0.34,-0.07), d 32.4*0.9*1.2 = 34.99, view offset sx 15 / sy 21.7 px (CSS 1600x900)",
+    "fov_deg": 28,
+    "elevation_deg": 0,
+    "yaw_from_broadside_deg": 0
+  },
+  "density": {
+    "principle": "large-sparse / small-dense (大疏大密): dense focal cluster at umbilicus + dorsal window + eye, quiet outer shell plates",
+    "teardown_gate_numbers": "gate-numbers.txt (hero): sil IoU 0.803, detail 1.05, dark 1.65, warm 0.30, far 1.29"
+  },
+  "palette": {
+    "background": "#E8E5DE",
+    "shell": "#D7D4CE",
+    "mechanism": "#2E3033",
+    "warm_metal": "#6D4619",
+    "accent": "#D16923",
+    "glow": "#F48C55",
+    "light": {
+      "kelvin": 5800
+    },
+    "measured_lab": {
+      "background": {
+        "L": 91.0,
+        "a": -0.04,
+        "b": 3.28,
+        "C": 3.3,
+        "h": 90.6
+      },
+      "shell": {
+        "share": 0.682,
+        "L": 84.8,
+        "C": 3.4,
+        "h": 88.8
+      },
+      "mechanism": {
+        "share": 0.281,
+        "L": 19.5,
+        "C": 2.2,
+        "h": 285.6
+      },
+      "warm_metal": {
+        "share": 0.0067,
+        "L": 33.4,
+        "C": 34.4,
+        "h": 68.9
+      },
+      "accent": {
+        "share": 0.0298,
+        "L": 56.5,
+        "C": 64.8,
+        "h": 56.5
+      },
+      "otsu_L": 51.6,
+      "L_p10": 11.5,
+      "L_p50": 72.9,
+      "L_p90": 96.3
+    },
+    "sampled_from_reference_px": {
+      "background": "median of the studio backdrop outside the dilated mask and HUD boxes, lookcheck.background_stats (#E8E5DE)",
+      "shell": "lookcheck.color_layers shell band (L>=Otsu 51.6), 10-90 pct trimmed mean RGB over the mask (#D7D4CE, L84.8 h89)",
+      "mechanism": "color_layers mechanism band (L<51.6): the black seams, gaps, hardware, tentacle joints; near-black in this render (#2E3033, L19.5)",
+      "warm_metal": "color_layers copper band (h20-85, C18-45, L25-72), small share 0.7% (#6D4619)",
+      "accent": "color_layers accent band (C>=45, L>=35, h<=95): orange ring stack, iris, jet bands (#D16923)",
+      "glow": "brightest quartile of the accent band (#F48C55)",
+      "light_kelvin": "5800 K, same neutral-warm daylight as the early cut (shell h89 vs bg h91)"
+    }
+  },
+  "notes": "mechanism is near-black here (L19), unlike the early cut's silver (L~70): the metal read in the final cut comes from specular on the dark parts; the mech_dark gate compares against L19.5."
+}
